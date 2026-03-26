@@ -40,7 +40,7 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml ./
 
 # Install ONLY production dependencies
-RUN pnpm install --prod --frozen-lockfile
+RUN pnpm install --prod --no-frozen-lockfile
 
 # Copy built files and prisma from base stage
 COPY --from=base /app/dist ./dist
