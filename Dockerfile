@@ -36,16 +36,18 @@ RUN npm install -g pnpm && \
 
 WORKDIR /app
 
-# Copy from build stage
-COPY --from=base /app/node_modules ./node_modules
+# Copy package files
+COPY package.json pnpm-lock.yaml ./
+
+# Install ONLY production dependencies
+RUN pnpm install --prod --frozen-lockfile
+
+# Copy built files and prisma from base stage
 COPY --from=base /app/dist ./dist
-COPY --from=base /app/package.json ./package.json
 COPY --from=base /app/prisma ./prisma
 
 # Expose the application port
 EXPOSE 3000
-
-# Set environment variable for port
 ENV PORT=3000
 
 # Start the application
