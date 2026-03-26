@@ -41,9 +41,10 @@ async function bootstrap() {
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
   app.useGlobalInterceptors(new TransformInterceptor());
 
-  const port = process.env.PORT || 3000;
+  const port = Number(process.env.PORT) || 3000;
   await app.listen(port, '0.0.0.0');
-  console.log(`Application is running on: ${await app.getUrl()}`);
+  const url = await app.getUrl();
+  console.log(`Application is running on: ${url}`);
 }
 bootstrap().catch((err) => {
   console.error('Error during bootstrap', err);
