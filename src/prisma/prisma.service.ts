@@ -16,15 +16,26 @@ export class PrismaService
   private readonly logger = new Logger(PrismaService.name);
 
   constructor(private configService: ConfigService) {
+    const host = configService.get<string>('DB_HOST', '127.0.0.1');
+    const port = parseInt(configService.get<string>('DB_PORT', '3306'), 10);
+    const database = configService.get<string>('DB_DATABASE', 'catatuang');
+    const useSsl = configService.get<string>('DB_SSL', 'false') === 'true';
+
     const adapter = new PrismaMariaDb({
-      host: configService.get<string>('DB_HOST', '127.0.0.1'),
+      host,
       user: configService.get<string>('DB_USERNAME', 'root'),
       password: configService.get<string>('DB_PASSWORD', ''),
-      database: configService.get<string>('DB_DATABASE', 'catatuang'),
-      port: parseInt(configService.get<string>('DB_PORT', '3306'), 10),
+      database,
+      port,
       connectionLimit: 10,
+      connectTimeout: 10000,
+      ssl: useSsl ? { rejectUnauthorized: true } : undefined,
     });
     super({ adapter });
+
+    this.logger.log(
+      `Database config: host=${host}, port=${port}, database=${database}, ssl=${String(useSsl)}`,
+    );
   }
 
   async onModuleInit() {
