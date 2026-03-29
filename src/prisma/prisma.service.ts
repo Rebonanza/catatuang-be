@@ -28,7 +28,7 @@ export class PrismaService
       database,
       port,
       connectionLimit: 10,
-      connectTimeout: 10000,
+      connectTimeout: 3000, // 3s per attempt
       ssl: useSsl ? { rejectUnauthorized: true } : undefined,
     });
     super({ adapter });
@@ -38,18 +38,12 @@ export class PrismaService
     );
   }
 
-  async onModuleInit() {
-    try {
-      this.logger.log('Connecting to database...');
-      await this.$connect();
-      this.logger.log('Database connection established');
-    } catch (error) {
-      this.logger.error('Failed to connect to database', error);
-      // Don't throw, let the app start but log the error
-      // Or we can throw to prevent the app from starting in a broken state
-      // If it's a critical connection, throwing is better for Fly.io to know it failed
-      throw error;
-    }
+  onModuleInit() {
+    void this.$connect()
+      .then(() => this.logger.log('Database connection established'))
+      .catch((error) =>
+        this.logger.error('Database connection failed', error.message),
+      );
   }
 
   async onModuleDestroy() {

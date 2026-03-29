@@ -20,12 +20,10 @@ primary_region = "ams"
     soft_limit = 200
 
   [[http_service.checks]]
-    grace_period = "30s"
+    grace_period = "15s"
     interval = "10s"
     timeout = "5s"
-    type = "http"
-    method = "GET"
-    path = "/api/v1/health"
+    type = "tcp"
 
 [[vm]]
   memory = "512mb"
