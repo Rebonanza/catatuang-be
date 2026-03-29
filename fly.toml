@@ -20,7 +20,7 @@ primary_region = "ams"
     soft_limit = 200
 
   [[http_service.checks]]
-    grace_period = "15s"
+    grace_period = "20s"
     interval = "10s"
     timeout = "5s"
     type = "tcp"
