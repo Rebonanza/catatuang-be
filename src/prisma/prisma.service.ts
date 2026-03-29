@@ -39,11 +39,13 @@ export class PrismaService
   }
 
   onModuleInit() {
+    this.logger.log('Connecting to database...');
+    // Non-blocking: connect in background so the app starts fast
     void this.$connect()
       .then(() => this.logger.log('Database connection established'))
-      .catch((error) =>
-        this.logger.error('Database connection failed', error.message),
-      );
+      .catch((error: unknown) => {
+        this.logger.error('Failed to connect to database', error);
+      });
   }
 
   async onModuleDestroy() {
