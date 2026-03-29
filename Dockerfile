@@ -54,4 +54,4 @@ EXPOSE 3000
 ENV PORT=3000
 
 # Start the application
-CMD ["pnpm", "start:prod"]
+CMD ["node", "dist/src/main"]
