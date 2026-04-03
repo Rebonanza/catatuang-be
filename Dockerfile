@@ -1,8 +1,8 @@
 # Use Node.js 20 slim as the base image
 FROM node:20-slim AS base
 
-# Install pnpm and openssl (required for Prisma and Node.js)
-RUN npm install -g pnpm && \
+# Enable corepack (ships with Node 20) and install openssl for Prisma
+RUN corepack enable && corepack prepare pnpm@latest --activate && \
     apt-get update -y && \
     apt-get install -y openssl && \
     rm -rf /var/lib/apt/lists/*
@@ -28,8 +28,8 @@ RUN pnpm build
 # Final target image
 FROM node:20-slim
 
-# Install pnpm and openssl for the runtime environment
-RUN npm install -g pnpm && \
+# Enable corepack and install openssl for the runtime environment
+RUN corepack enable && corepack prepare pnpm@latest --activate && \
     apt-get update -y && \
     apt-get install -y openssl && \
     rm -rf /var/lib/apt/lists/*
@@ -49,9 +49,8 @@ COPY --from=base /app/prisma ./prisma
 # Generate Prisma Client in the production node_modules
 RUN pnpm prisma generate
 
-# Expose the application port
+# Expose the default port (Koyeb overrides PORT at runtime)
 EXPOSE 3000
-ENV PORT=3000
 
-# Start the application
-CMD ["node", "dist/src/main"]
+# Run DB migrations then start the app
+CMD ["sh", "-c", "pnpm prisma migrate deploy && node dist/src/main"]
