@@ -3,6 +3,15 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 
+interface TransactionFilter {
+  page?: string;
+  limit?: string;
+  startDate?: string;
+  endDate?: string;
+  transactionType?: string;
+  categoryId?: string;
+}
+
 @Injectable()
 export class TransactionsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -22,7 +31,7 @@ export class TransactionsService {
     });
   }
 
-  async findAll(userId: string, filter?: any) {
+  async findAll(userId: string, filter?: TransactionFilter) {
     const page = filter?.page ? parseInt(filter.page) : 1;
     const limit = filter?.limit ? parseInt(filter.limit) : 20;
     const skip = (page - 1) * limit;
@@ -31,8 +40,8 @@ export class TransactionsService {
 
     if (filter?.startDate && filter?.endDate) {
       whereClause.transactedAt = {
-        gte: new Date(filter.startDate),
-        lte: new Date(filter.endDate),
+        gte: new Date(filter.startDate as string),
+        lte: new Date(filter.endDate as string),
       };
     }
     if (filter?.transactionType) {
@@ -94,7 +103,11 @@ export class TransactionsService {
     });
   }
 
-  async getSummary(userId: string, month: number, year: number) {
+  private async calculatePeriodSummary(
+    userId: string,
+    month: number,
+    year: number,
+  ) {
     const startDate = new Date(year, month - 1, 1);
     const endDate = new Date(year, month, 0, 23, 59, 59, 999);
 
@@ -105,8 +118,8 @@ export class TransactionsService {
       },
     });
 
-    const summary = transactions.reduce(
-      (acc: any, curr: any) => {
+    return transactions.reduce(
+      (acc: { income: number; expense: number }, curr) => {
         const amount = Number(curr.amount);
         if (curr.transactionType === 'income') acc.income += amount;
         else acc.expense += amount;
@@ -114,13 +127,52 @@ export class TransactionsService {
       },
       { income: 0, expense: 0 },
     );
+  }
+
+  private calculateTrend(current: number, previous: number) {
+    if (previous === 0)
+      return { value: current > 0 ? 100 : 0, isPositive: current > 0 };
+    const diff = current - previous;
+    const percentage = Math.round((Math.abs(diff) / previous) * 100);
+    return {
+      value: percentage,
+      isPositive: diff >= 0,
+    };
+  }
+
+  async getSummary(userId: string, month: number, year: number) {
+    const currentSummary = await this.calculatePeriodSummary(
+      userId,
+      month,
+      year,
+    );
+
+    const prevMonth = month === 1 ? 12 : month - 1;
+    const prevYear = month === 1 ? year - 1 : year;
+    const prevSummary = await this.calculatePeriodSummary(
+      userId,
+      prevMonth,
+      prevYear,
+    );
+
+    const currentBalance = currentSummary.income - currentSummary.expense;
+    const prevBalance = prevSummary.income - prevSummary.expense;
 
     return {
       month,
       year,
-      income: summary.income,
-      expense: summary.expense,
-      balance: summary.income - summary.expense,
+      income: currentSummary.income,
+      incomeTrend: this.calculateTrend(
+        currentSummary.income,
+        prevSummary.income,
+      ),
+      expense: currentSummary.expense,
+      expenseTrend: this.calculateTrend(
+        currentSummary.expense,
+        prevSummary.expense,
+      ),
+      balance: currentBalance,
+      balanceTrend: this.calculateTrend(currentBalance, prevBalance),
     };
   }
 
@@ -137,23 +189,29 @@ export class TransactionsService {
       include: { category: true },
     });
 
-    const categorySummary = transactions.reduce((acc: any, curr: any) => {
-      const catName = curr.category?.name || 'Lainnya';
-      const amount = Number(curr.amount);
+    const categorySummary = transactions.reduce(
+      (
+        acc: Record<string, { name: string; value: number; color: string }>,
+        curr,
+      ) => {
+        const catName = curr.category?.name || 'Lainnya';
+        const amount = Number(curr.amount);
 
-      if (!acc[catName]) {
-        acc[catName] = {
-          name: catName,
-          value: 0,
-          color: curr.category?.color || '#94a3b8',
-        };
-      }
-      acc[catName].value += amount;
-      return acc;
-    }, {});
+        if (!acc[catName]) {
+          acc[catName] = {
+            name: catName,
+            value: 0,
+            color: curr.category?.color || '#94a3b8',
+          };
+        }
+        acc[catName].value += amount;
+        return acc;
+      },
+      {},
+    );
 
     return Object.values(categorySummary).sort(
-      (a: any, b: any) => b.value - a.value,
+      (a: { value: number }, b: { value: number }) => b.value - a.value,
     );
   }
 }
