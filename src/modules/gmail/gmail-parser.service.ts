@@ -1,6 +1,10 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ParseStatus } from '../../common/constants/transaction.constant';
+import {
+  ParseStatus,
+  TransactionType,
+  BankSource,
+} from '../../common/constants/transaction.constant';
 import { ParsedTransaction } from './parsers/base.parser';
 import { AiParser } from './parsers/ai.parser';
 
@@ -11,10 +15,7 @@ export class GmailParserService implements OnModuleInit {
   constructor(private readonly configService: ConfigService) {}
 
   onModuleInit() {
-    const apiKey = this.configService.get<string>('GEMINI_API_KEY');
-    if (apiKey) {
-      this.aiParser = new AiParser(apiKey);
-    }
+    this.aiParser = new AiParser(this.configService);
   }
 
   isPossibleTransaction(
@@ -78,7 +79,6 @@ export class GmailParserService implements OnModuleInit {
     subject: string,
     snippet: string,
   ): Promise<ParsedTransaction> {
-    console.log(`ParserService: Parsing email from ${from}`);
     try {
       if (!this.aiParser) {
         return {
@@ -88,7 +88,17 @@ export class GmailParserService implements OnModuleInit {
       }
 
       const result = await this.aiParser.parse(from, subject, snippet);
-      return result;
+      return {
+        ...result,
+        status: result.status as ParseStatus,
+        type: result.type as TransactionType,
+        date: result.date ? new Date(result.date) : undefined,
+        amount: result.amount ?? undefined,
+        merchant: result.merchant ?? undefined,
+        bankSource: result.bankSource as BankSource,
+        category: result.category ?? undefined,
+        reason: result.reason ?? undefined,
+      };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       return { status: ParseStatus.FAILED, reason: message };

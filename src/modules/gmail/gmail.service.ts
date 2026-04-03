@@ -174,23 +174,11 @@ export class GmailService {
       };
     }
 
-    this.logger.log(`Manual sync requested for user: ${userId}`);
-
     // We simulate a webhook-like check from the current historyId
     const auth = this.getOAuth2Client(userId, token);
     const gmail = google.gmail({ version: 'v1', auth });
 
     try {
-      // Debug: Check token info and scopes
-      try {
-        const oauth2 = google.oauth2({ version: 'v2', auth });
-        const tokenInfo = await oauth2.tokeninfo();
-        this.logger.debug(`Token Info: ${JSON.stringify(tokenInfo.data)}`);
-      } catch (e: unknown) {
-        const message = e instanceof Error ? e.message : String(e);
-        this.logger.warn(`Could not verify token info: ${message}`);
-      }
-
       const historyRes = await gmail.users.history.list({
         userId: 'me',
         startHistoryId: token.historyId,
@@ -249,8 +237,6 @@ export class GmailService {
     const { emailAddress, historyId } = payload;
     if (!emailAddress) return { success: true };
 
-    this.logger.log(`Real-time sync triggered for email: ${emailAddress}`);
-
     const user = await this.prisma.user.findUnique({
       where: { email: emailAddress },
       include: { gmailToken: true },
@@ -304,9 +290,6 @@ export class GmailService {
   ) {
     // Prevent duplicate processing
     if (this.processingMessages.has(messageId)) {
-      this.logger.debug(
-        `Already processing message: ${messageId} in other process.`,
-      );
       return;
     }
     this.processingMessages.add(messageId);
@@ -325,12 +308,6 @@ export class GmailService {
         headers.find((h) => h.name === 'Subject')?.value || 'No Subject';
       const snippet = message.snippet || '';
 
-      this.logger.debug(`Processing email:
-        From: ${fromHeader}
-        Subject: ${subjectHeader}
-        Snippet: ${snippet}
-      `);
-
       if (
         !this.parserService.isPossibleTransaction(
           fromHeader,
@@ -338,7 +315,6 @@ export class GmailService {
           snippet,
         )
       ) {
-        this.logger.debug(`Skipping non-transactional email: ${subjectHeader}`);
         return;
       }
 
@@ -348,7 +324,6 @@ export class GmailService {
       });
 
       if (existingLog) {
-        this.logger.debug(`Email already processed: ${messageId}. Skipping.`);
         return;
       }
 
@@ -439,9 +414,7 @@ export class GmailService {
         error.code === 'P2002';
 
       if (isPrismaUniqueError) {
-        this.logger.debug(
-          `Message ${messageId} already exists (race condition). Skipping.`,
-        );
+        // Skip
       } else {
         this.logger.error(`Failed to process message ${messageId}`, error);
       }
@@ -452,8 +425,6 @@ export class GmailService {
 
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async renewWatches() {
-    this.logger.log('Checking for Gmail watches to renew...');
-
     // Find watches expiring in the next 2 days
     const twoDaysFromNow = new Date();
     twoDaysFromNow.setDate(twoDaysFromNow.getDate() + 2);
@@ -467,12 +438,9 @@ export class GmailService {
       },
     });
 
-    this.logger.log(`Found ${expiringTokens.length} watches to renew.`);
-
     for (const token of expiringTokens) {
       try {
         await this.startWatch(token.userId);
-        this.logger.log(`Renewed watch for user: ${token.userId}`);
       } catch (error) {
         this.logger.error(
           `Failed to renew watch for user: ${token.userId}`,

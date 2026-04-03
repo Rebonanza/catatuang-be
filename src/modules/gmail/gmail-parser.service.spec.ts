@@ -5,7 +5,7 @@ import {
 } from '../../common/constants/transaction.constant';
 
 import { GmailParserService } from './gmail-parser.service';
-import { AiParser } from './parsers/ai.parser';
+import { AiParser, GeminiParsedResponse } from './parsers/ai.parser';
 
 jest.mock('./parsers/ai.parser');
 
@@ -60,14 +60,15 @@ describe('GmailParserService', () => {
 
   describe('parseEmail', () => {
     it('should parse BCA expense', async () => {
-      const resultData = {
-        status: ParseStatus.SUCCESS,
+      const resultData: GeminiParsedResponse = {
+        status: 'success',
         amount: 50000,
-        type: TransactionType.EXPENSE,
+        type: 'expense',
         merchant: 'ANDRE',
-        bankSource: BankSource.BCA,
+        bankSource: 'BCA',
         category: 'Lainnya (Pengeluaran)',
-        date: new Date('2026-03-22T17:47:00'),
+        date: '2026-03-22T17:47:00.000Z',
+        reason: null,
       };
       mockAiParser.parse.mockResolvedValue(resultData);
 
@@ -89,14 +90,15 @@ describe('GmailParserService', () => {
     });
 
     it('should parse GoPay payment', async () => {
-      const resultData = {
-        status: ParseStatus.SUCCESS,
+      const resultData: GeminiParsedResponse = {
+        status: 'success',
         amount: 25000,
-        type: TransactionType.EXPENSE,
+        type: 'expense',
         merchant: 'Kopi Kenangan',
-        bankSource: BankSource.GOPAY,
+        bankSource: 'GoPay',
         category: 'Makan & Minum',
-        date: new Date('2026-03-22T00:00:00'),
+        date: '2026-03-22T00:00:00.000Z',
+        reason: null,
       };
       mockAiParser.parse.mockResolvedValue(resultData);
 
@@ -115,6 +117,32 @@ describe('GmailParserService', () => {
       expect(result.merchant).toBe('Kopi Kenangan');
       expect(result.bankSource).toBe(BankSource.GOPAY);
       expect(result.category).toBe('Makan & Minum');
+    });
+
+    it('should fail for promotional emails', async () => {
+      const resultData: GeminiParsedResponse = {
+        status: 'failed',
+        amount: null,
+        type: 'expense',
+        merchant: null,
+        bankSource: null,
+        category: null,
+        date: null,
+        reason: 'promotion',
+      };
+      mockAiParser.parse.mockResolvedValue(resultData);
+
+      const subject = 'Spotify Premium: Coba 3 Bulan Gratis';
+      const snippet =
+        'Nikmati musik tanpa iklan dengan Spotify Premium. Coba sekarang!';
+      const result = await service.parseEmail(
+        'no-reply@spotify.com',
+        subject,
+        snippet,
+      );
+
+      expect(result.status).toBe(ParseStatus.FAILED);
+      expect(result.reason).toBe('promotion');
     });
   });
 });

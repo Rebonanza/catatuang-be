@@ -32,20 +32,12 @@ export class PrismaService
       ssl: useSsl ? { rejectUnauthorized: true } : undefined,
     });
     super({ adapter });
-
-    this.logger.log(
-      `Database config: host=${host}, port=${port}, database=${database}, ssl=${String(useSsl)}`,
-    );
   }
 
   onModuleInit() {
-    this.logger.log('Connecting to database...');
-    // Non-blocking: connect in background so the app starts fast
-    void this.$connect()
-      .then(() => this.logger.log('Database connection established'))
-      .catch((error: unknown) => {
-        this.logger.error('Failed to connect to database', error);
-      });
+    void this.$connect().catch((error: unknown) => {
+      this.logger.error('Failed to connect to database', error);
+    });
   }
 
   async onModuleDestroy() {

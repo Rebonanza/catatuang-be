@@ -7,7 +7,6 @@ import {
   HttpCode,
   HttpStatus,
   Get,
-  Redirect,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
@@ -22,7 +21,7 @@ import type {
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) { }
+  constructor(private readonly authService: AuthService) {}
 
   @Post('register')
   register(@Body() dto: RegisterDto) {
@@ -61,20 +60,15 @@ export class AuthController {
   }
 
   @Get('google/callback')
-  @UseGuards(GoogleAuthGuard)
-  @Redirect()
   googleAuthRedirect(@Req() req: GoogleAuthenticatedRequest) {
-    console.log('Google Auth Redirect reached', { user: !!req.user });
     const url = process.env.FRONTEND_URL || 'http://localhost:5173';
     if (!req.user) {
-      console.error('No user found in request');
       return {
         url: `${url}/login?error=no_user`,
         statusCode: 302,
       };
     }
     const { accessToken, refreshToken } = req.user;
-    console.log('Redirecting to frontend with tokens');
     return {
       url: `${url}/auth/callback?access_token=${accessToken}&refresh_token=${refreshToken}`,
       statusCode: 302,

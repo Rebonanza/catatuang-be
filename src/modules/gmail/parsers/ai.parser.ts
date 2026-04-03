@@ -1,30 +1,38 @@
+import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI, GenerativeModel } from '@google/generative-ai';
-import {
-  TransactionType,
-  BankSource,
-  ParseStatus,
-} from '../../../common/constants/transaction.constant';
-import { ParsedTransaction } from './base.parser';
 
-interface GeminiParsedResponse {
-  amount: number;
-  type: string;
-  merchant: string;
-  bankSource: string | null;
-  category: string;
-  date: string;
+export interface GeminiParsedResponse {
   status: string;
-  reason?: string;
+  type: string;
+  amount: number | null;
+  merchant: string | null;
+  bankSource: string | null;
+  date: string | null;
+  category: string | null;
+  reason: string | null;
 }
 
+interface GeminiError {
+  status?: number;
+  response?: {
+    status?: number;
+  };
+}
+
+@Injectable()
 export class AiParser {
   private genAI: GoogleGenerativeAI;
   private model: GenerativeModel;
 
-  constructor(apiKey: string) {
+  constructor(private configService: ConfigService) {
+    const apiKey = this.configService.get<string>('GEMINI_API_KEY');
+    if (!apiKey) {
+      throw new Error('GEMINI_API_KEY is not defined');
+    }
     this.genAI = new GoogleGenerativeAI(apiKey);
     this.model = this.genAI.getGenerativeModel({
-      model: 'gemini-2.5-flash-lite',
+      model: 'gemini-1.5-flash',
       generationConfig: {
         responseMimeType: 'application/json',
       },
@@ -35,101 +43,82 @@ export class AiParser {
     from: string,
     subject: string,
     snippet: string,
-  ): Promise<ParsedTransaction> {
+  ): Promise<GeminiParsedResponse> {
     const prompt = `
-      You are an expert financial transaction parser for bank and fintech notifications (BCA, BRI, Mandiri, GoPay, OVO, DANA, and any others).
-      Support both Indonesian and English languages.
-      Parse the following email sender, subject, and content into a structured JSON format.
-
-      JSON fields:
-      - amount: number (numeric, absolute value, no separators)
-      - type: "income" | "expense"
-      - merchant: string (clean and concise, e.g., "McDonald's", "GoPay Topup", "Transfer to John")
-      - bankSource: string (e.g., "BCA", "BRI", "Mandiri", "GoPay", "OVO", "PayPal", etc) or null
-      - category: string (choose one that best fits from the list below or suggest one if none fits)
-      - date: string (ISO 8601 format including time like YYYY-MM-DDTHH:mm:ssZ, use current year 2026 if not specified. Highly preferred to include the exact transaction time if found in the email)
-      - status: "success" | "failed" | "needs_review"
-
-      Recommended Categories:
-      - Makan & Minum
-      - Transport
-      - Belanja
-      - Tagihan & Utilitas
-      - Kesehatan
-      - Hiburan
-      - Pendidikan
-      - Gaji
-      - Transfer Masuk
-      - Lainnya (Pengeluaran)
-      - Lainnya (Pemasukan)
+      Extract transaction data from this Indonesian bank email notification.
+      From: ${from}
+      Subject: ${subject}
+      Snippet: ${snippet}
 
       Rules:
-      1. If it's a "Tarik Tunai" or "Withdrawal", it's an "expense" and merchant is "Cash Withdrawal" and category is "Lainnya (Pengeluaran)".
-      2. If it's a transfer from someone else, it's "income" and category is "Transfer Masuk".
-      3. If it's a transfer to someone else, it's "expense" and category is "Transport" or "Lainnya (Pengeluaran)".
-      4. If it's not a financial transaction or bank notification, return {"status": "failed", "reason": "Not a transaction notification"}.
-      5. Standardize merchant names (e.g., "PT. GOJEK INDONESIA" -> "Gojek").
-      6. Use the sender address to help identify the bankSource if not clear from content.
+      1. CRITICAL: Distinguish between a real TRANSACTION notification and a PROMOTION/ADVERTISEMENT.
+      2. A real transaction must have a clear amount that was deducted, added, or paid.
+      3. If the email is a promotion, newsletter, offer, or advertisement (e.g., Spotify ads, 'Try Premium' offers, marketing newsletters), set status to 'failed' and reason to 'promotion'.
+      4. If it's a real money transfer, payment, or expense, type is 'expense'.
+      5. If it's a real received transfer or balance addition, type is 'income'.
+      6. If no transaction data found or it is clearly not a financial transaction, set status to 'failed'.
+      7. If a valid transaction is found, set status to 'success'.
+      8. Amount must be a number or null.
+      9. Merchant is the destination of the payment or source of income.
+      10. BankSource is the bank/wallet name (e.g., BCA, Mandiri, GoPay, OVO).
+      11. Date must be in ISO format or null.
+      12. Category must be one of: 'Makan & Minum', 'Transport', 'Belanja', 'Tagihan & Utilitas', 'Kesehatan', 'Hiburan', 'Pendidikan', 'Gaji', 'Transfer Masuk'. Find the most suitable.
 
-      Email Sender: ${from}
-      Email Subject: ${subject}
-      Email Content: ${snippet}
+      Respond in JSON format:
+      {
+        "status": "success" | "failed",
+        "type": "expense" | "income",
+        "amount": number,
+        "merchant": string,
+        "bankSource": string,
+        "date": "ISOString",
+        "category": string,
+        "reason": string
+      }
     `;
 
     const maxRetries = 3;
     let retryCount = 0;
-    let lastError: any;
+    let lastError: unknown;
 
     while (retryCount <= maxRetries) {
       try {
-        console.log(
-          `AiParser: Calling Gemini API (Attempt ${retryCount + 1})...`,
-        );
         const result = await this.model.generateContent(prompt);
         const response = result.response;
         const text = response.text();
-        console.log('Gemini Raw Response:', text);
         const parsed = JSON.parse(text) as GeminiParsedResponse;
-        console.log('Gemini Parsed Response:', parsed);
 
         return {
-          status: parsed.status as ParseStatus,
+          status: parsed.status,
+          type: parsed.type,
           amount: parsed.amount,
-          type: parsed.type as TransactionType,
           merchant: parsed.merchant,
-          bankSource: parsed.bankSource as BankSource,
+          bankSource: parsed.bankSource,
+          date: parsed.date,
           category: parsed.category,
-          date: parsed.date ? new Date(parsed.date) : new Date(),
           reason: parsed.reason,
         };
       } catch (error: unknown) {
         lastError = error;
+
+        const geminiError = error as GeminiError;
         const isRateLimit =
           error instanceof Error &&
           (error.message.includes('429') ||
-            (error as any).status === 429 ||
-            (error as any).response?.status === 429);
+            geminiError.status === 429 ||
+            geminiError.response?.status === 429);
 
         if (isRateLimit && retryCount < maxRetries) {
           const delay = Math.pow(2, retryCount + 1) * 1000;
-          console.warn(`Rate limit hit. Retrying in ${delay / 1000}s...`);
           await new Promise((resolve) => setTimeout(resolve, delay));
           retryCount++;
           continue;
         }
 
-        break; // Not a rate limit or ran out of retries
+        throw error;
       }
     }
 
-    const failureReason =
-      lastError instanceof Error
-        ? lastError.message
-        : 'AI Parsing failed after retries';
-
-    return {
-      status: ParseStatus.FAILED,
-      reason: failureReason,
-    };
+    throw lastError;
   }
 }

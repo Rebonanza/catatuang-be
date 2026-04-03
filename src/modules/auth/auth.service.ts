@@ -166,11 +166,6 @@ export class AuthService {
     gmailAccessToken: string,
     gmailRefreshToken: string | undefined,
   ) {
-    this.logger.debug('Google Auth Callback received:', {
-      hasAccessToken: !!gmailAccessToken,
-      hasRefreshToken: !!gmailRefreshToken,
-      email: profile.emails?.[0]?.value,
-    });
     const email = profile.emails?.[0]?.value;
     if (!email) {
       throw new UnauthorizedException('Email not found in Google profile');
