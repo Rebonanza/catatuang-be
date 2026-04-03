@@ -7,6 +7,7 @@ import {
   HttpCode,
   HttpStatus,
   Get,
+  Redirect,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
@@ -60,6 +61,8 @@ export class AuthController {
   }
 
   @Get('google/callback')
+  @UseGuards(GoogleAuthGuard)
+  @Redirect()
   googleAuthRedirect(@Req() req: GoogleAuthenticatedRequest) {
     const url = process.env.FRONTEND_URL || 'http://localhost:5173';
     if (!req.user) {

@@ -128,7 +128,7 @@ export class AuthService {
     }
 
     if (tokenRecord.isRevoked || tokenRecord.expiresAt < new Date()) {
-      throw new UnauthorizedException('Token expired atau direvoke');
+      throw new UnauthorizedException('Token expired');
     }
 
     return this.prisma.$transaction(async (tx) => {
