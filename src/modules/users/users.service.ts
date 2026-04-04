@@ -17,6 +17,7 @@ export class UsersService {
         avatarUrl: true,
         createdAt: true,
         updatedAt: true,
+        passwordHash: true,
       },
     });
 
@@ -24,7 +25,11 @@ export class UsersService {
       throw new NotFoundException('User not found');
     }
 
-    return user;
+    const { passwordHash, ...result } = user;
+    return {
+      ...result,
+      hasPassword: !!passwordHash,
+    };
   }
 
   async updateProfile(userId: string, dto: UpdateUserDto) {
@@ -36,7 +41,7 @@ export class UsersService {
       throw new NotFoundException('User not found');
     }
 
-    return this.prisma.user.update({
+    const updatedUser = await this.prisma.user.update({
       where: { id: userId },
       data: dto,
       select: {
@@ -47,7 +52,14 @@ export class UsersService {
         avatarUrl: true,
         createdAt: true,
         updatedAt: true,
+        passwordHash: true,
       },
     });
+
+    const { passwordHash, ...result } = updatedUser;
+    return {
+      ...result,
+      hasPassword: !!passwordHash,
+    };
   }
 }

@@ -2,6 +2,7 @@ import {
   ConflictException,
   Injectable,
   UnauthorizedException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
@@ -10,6 +11,7 @@ import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { TransactionType } from '../../common/constants/transaction.constant';
 import { Prisma } from '@prisma/client';
 import { Profile } from 'passport-google-oauth20';
@@ -148,6 +150,55 @@ export class AuthService {
     return { success: true };
   }
 
+  async changePassword(userId: string, dto: ChangePasswordDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { passwordHash: true, googleId: true },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    if (user.passwordHash) {
+      // Account already has a password — current password is required
+      if (!dto.currentPassword) {
+        throw new UnprocessableEntityException({
+          code: 'VALIDATION_ERROR',
+          message: 'Current password is required',
+          details: [],
+        });
+      }
+      const isMatch = await bcrypt.compare(
+        dto.currentPassword,
+        user.passwordHash,
+      );
+      if (!isMatch) {
+        throw new UnauthorizedException({
+          code: 'UNAUTHORIZED',
+          message: 'Current password is incorrect',
+          details: [],
+        });
+      }
+    }
+    // Google-only account: no passwordHash → skip current-password check,
+    // just set the new password (enables email+password login going forward)
+
+    const newHash = await bcrypt.hash(dto.newPassword, 12);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash: newHash },
+    });
+
+    // Revoke all refresh tokens → force re-login on all devices
+    await this.prisma.refreshToken.updateMany({
+      where: { userId, isRevoked: false },
+      data: { isRevoked: true },
+    });
+
+    return { success: true };
+  }
+
   async getMe(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -156,9 +207,20 @@ export class AuthService {
         email: true,
         name: true,
         avatarUrl: true,
+        passwordHash: true,
       },
     });
-    return { success: true, data: user };
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+    const { passwordHash, ...result } = user;
+    return {
+      success: true,
+      data: {
+        ...result,
+        hasPassword: !!passwordHash,
+      },
+    };
   }
 
   async googleAuthCallback(

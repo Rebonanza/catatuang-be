@@ -130,13 +130,21 @@ export class TransactionsService {
   }
 
   private calculateTrend(current: number, previous: number) {
-    if (previous === 0)
-      return { value: current > 0 ? 100 : 0, isPositive: current > 0 };
+    // Both zero → no meaningful trend to show
+    if (previous === 0 && current === 0) {
+      return { value: 0, isPositive: true, noData: true };
+    }
+    // Previous was zero but now there is data → brand-new activity
+    if (previous === 0) {
+      return { value: 100, isPositive: current > 0, noData: false };
+    }
     const diff = current - previous;
-    const percentage = Math.round((Math.abs(diff) / previous) * 100);
+    // Use Math.abs(previous) so negative balances produce a correct positive percentage
+    const percentage = Math.round((Math.abs(diff) / Math.abs(previous)) * 100);
     return {
       value: percentage,
       isPositive: diff >= 0,
+      noData: false,
     };
   }
 
