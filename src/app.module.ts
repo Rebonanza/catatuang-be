@@ -8,9 +8,18 @@ import { CategoriesModule } from './modules/categories/categories.module';
 import { TransactionsModule } from './modules/transactions/transactions.module';
 import { HealthModule } from './modules/health/health.module';
 
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
+
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000,
+        limit: 100,
+      },
+    ]),
     ScheduleModule.forRoot(),
     PrismaModule,
     AuthModule,
@@ -18,6 +27,12 @@ import { HealthModule } from './modules/health/health.module';
     CategoriesModule,
     TransactionsModule,
     HealthModule,
+  ],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
   ],
 })
 export class AppModule {}

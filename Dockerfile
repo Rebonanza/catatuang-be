@@ -52,5 +52,5 @@ RUN pnpm prisma generate
 # Expose the default port (Koyeb overrides PORT at runtime)
 EXPOSE 3000
 
-# Start the application
-CMD ["node", "dist/src/main"]
+# Start the application with automatic migrations
+CMD ["sh", "-c", "pnpm prisma migrate deploy && node dist/src/main"]

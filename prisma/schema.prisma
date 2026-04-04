@@ -35,6 +35,7 @@ model RefreshToken {
 
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId])
   @@map("refresh_tokens")
 }
 
@@ -68,6 +69,7 @@ model Category {
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   transactions    Transaction[]
 
+  @@index([userId])
   @@map("categories")
 }
 
@@ -90,6 +92,8 @@ model Transaction {
   category        Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   emailLogs       EmailLog[]
 
+  @@index([userId, transactedAt])
+  @@index([userId, categoryId])
   @@map("transactions")
 }
 
