@@ -337,7 +337,11 @@ export class GmailService {
       await new Promise((resolve) => setTimeout(resolve, 2000));
 
       let categoryId: string | null = null;
-      if (parsedData.status === ParseStatus.SUCCESS && parsedData.amount && parsedData.category) {
+      if (
+        parsedData.status === ParseStatus.SUCCESS &&
+        parsedData.amount &&
+        parsedData.category
+      ) {
         const category = await this.prisma.category.findFirst({
           where: {
             userId,
