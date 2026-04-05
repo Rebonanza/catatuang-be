@@ -4,7 +4,7 @@ FROM node:20-slim AS base
 # Enable corepack (ships with Node 20) and install openssl for Prisma
 RUN corepack enable && corepack prepare pnpm@latest --activate && \
     apt-get update -y && \
-    apt-get install -y openssl && \
+    apt-get install -y openssl ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 # Create app directory
