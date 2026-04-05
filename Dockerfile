@@ -54,4 +54,4 @@ RUN DATABASE_URL="mysql://dummy:dummy@localhost:3306/dummy" pnpm prisma generate
 EXPOSE 3000
 
 # Start the application with schema synchronization
-CMD ["sh", "-c", "DATABASE_URL=$DATABASE_URL pnpm prisma db push --skip-generate && node dist/src/main"]
+CMD ["sh", "-c", "DATABASE_URL=$DATABASE_URL pnpm prisma db push && node dist/src/main"]
