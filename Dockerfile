@@ -45,6 +45,7 @@ RUN pnpm install --prod --no-frozen-lockfile
 # Copy built files and prisma from base stage
 COPY --from=base /app/dist ./dist
 COPY --from=base /app/prisma ./prisma
+COPY --from=base /app/prisma.config.ts ./
 
 # Generate Prisma Client in the production node_modules
 RUN DATABASE_URL="mysql://dummy:dummy@localhost:3306/dummy" pnpm prisma generate
