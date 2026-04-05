@@ -31,7 +31,7 @@ FROM node:20-slim
 # Enable corepack and install openssl for the runtime environment
 RUN corepack enable && corepack prepare pnpm@latest --activate && \
     apt-get update -y && \
-    apt-get install -y openssl && \
+    apt-get install -y openssl ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
