@@ -19,8 +19,8 @@ RUN pnpm install --no-frozen-lockfile
 # Copy source code and other required files
 COPY . .
 
-# Generate Prisma Client
-RUN pnpm prisma generate
+# Generate Prisma Client (uses dummy URL for build-time validation)
+RUN DATABASE_URL="mysql://dummy:dummy@localhost:3306/dummy" pnpm prisma generate
 
 # Build the application
 RUN pnpm build
@@ -47,7 +47,7 @@ COPY --from=base /app/dist ./dist
 COPY --from=base /app/prisma ./prisma
 
 # Generate Prisma Client in the production node_modules
-RUN pnpm prisma generate
+RUN DATABASE_URL="mysql://dummy:dummy@localhost:3306/dummy" pnpm prisma generate
 
 # Expose the default port (Koyeb overrides PORT at runtime)
 EXPOSE 3000
