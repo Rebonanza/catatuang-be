@@ -27,8 +27,8 @@ export class PrismaService
       password: configService.get<string>('DB_PASSWORD', ''),
       database,
       port,
-      connectionLimit: 10,
-      connectTimeout: 3000, // 3s per attempt
+      connectionLimit: 20,
+      connectTimeout: 5000, // 5s per attempt
       ssl: useSsl ? { rejectUnauthorized: true } : undefined,
     });
     super({ adapter });

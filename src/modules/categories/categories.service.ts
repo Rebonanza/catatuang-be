@@ -72,15 +72,18 @@ export class CategoriesService {
     if (category.isDefault)
       throw new BadRequestException('Cannot delete default category');
 
-    return this.prisma.$transaction(async (tx) => {
-      // Nullify categoryId in transactions
-      await tx.transaction.updateMany({
-        where: { categoryId: id },
-        data: { categoryId: null },
-      });
+    return this.prisma.$transaction(
+      async (tx) => {
+        // Nullify categoryId in transactions
+        await tx.transaction.updateMany({
+          where: { categoryId: id },
+          data: { categoryId: null },
+        });
 
-      // Delete the category
-      return tx.category.delete({ where: { id } });
-    });
+        // Delete the category
+        return tx.category.delete({ where: { id } });
+      },
+      { maxWait: 5000, timeout: 10000 },
+    );
   }
 }

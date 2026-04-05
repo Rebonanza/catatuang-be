@@ -66,29 +66,32 @@ export class AuthService {
     }
 
     const passwordHash = await bcrypt.hash(dto.password, 12);
-    return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      const user = await tx.user.create({
-        data: {
-          email: dto.email,
-          passwordHash,
-          name: dto.name,
-        },
-      });
+    return this.prisma.$transaction(
+      async (tx: Prisma.TransactionClient) => {
+        const user = await tx.user.create({
+          data: {
+            email: dto.email,
+            passwordHash,
+            name: dto.name,
+          },
+        });
 
-      const categoriesData = this.defaultCategories.map((cat) => ({
-        userId: user.id,
-        name: cat.name,
-        icon: cat.icon,
-        transactionType: cat.type,
-        isDefault: true,
-      }));
+        const categoriesData = this.defaultCategories.map((cat) => ({
+          userId: user.id,
+          name: cat.name,
+          icon: cat.icon,
+          transactionType: cat.type,
+          isDefault: true,
+        }));
 
-      await tx.category.createMany({
-        data: categoriesData,
-      });
+        await tx.category.createMany({
+          data: categoriesData,
+        });
 
-      return this.generateTokens(user.id, tx);
-    });
+        return this.generateTokens(user.id, tx);
+      },
+      { maxWait: 5000, timeout: 10000 },
+    );
   }
 
   async login(dto: LoginDto) {
@@ -133,13 +136,16 @@ export class AuthService {
       throw new UnauthorizedException('Token expired');
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      await tx.refreshToken.update({
-        where: { id: tokenRecord.id },
-        data: { isRevoked: true },
-      });
-      return this.generateTokens(tokenRecord.userId, tx);
-    });
+    return this.prisma.$transaction(
+      async (tx) => {
+        await tx.refreshToken.update({
+          where: { id: tokenRecord.id },
+          data: { isRevoked: true },
+        });
+        return this.generateTokens(tokenRecord.userId, tx);
+      },
+      { maxWait: 5000, timeout: 10000 },
+    );
   }
 
   async logout(userId: string) {

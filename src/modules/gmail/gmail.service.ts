@@ -336,76 +336,77 @@ export class GmailService {
       // Add a small delay after a successful AI call to respect rate limits
       await new Promise((resolve) => setTimeout(resolve, 2000));
 
-      await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-        let transactionId: string | null = null;
-        if (parsedData.status === ParseStatus.SUCCESS && parsedData.amount) {
-          // Find category by name
-          let categoryId: string | null = null;
-          if (parsedData.category) {
-            const category = await tx.category.findFirst({
-              where: {
-                userId,
-                name: { equals: parsedData.category },
-              },
-            });
-
-            if (category) {
-              categoryId = category.id;
-            } else {
-              // Try to find fallback category "Lainnya" based on type
-              const fallbackName =
-                parsedData.type === TransactionType.INCOME
-                  ? 'Lainnya (Pemasukan)'
-                  : 'Lainnya (Pengeluaran)';
-
-              const fallbackCategory = await tx.category.findFirst({
-                where: {
-                  userId,
-                  name: { contains: fallbackName },
-                },
-              });
-              if (fallbackCategory) {
-                categoryId = fallbackCategory.id;
-              }
-            }
-          }
-
-          const t = await tx.transaction.create({
-            data: {
-              userId,
-              categoryId,
-              amount: parsedData.amount,
-              transactionType: parsedData.type as string,
-              merchant: parsedData.merchant,
-              bankSource: parsedData.bankSource,
-              source: TransactionSource.AUTO_PARSED,
-              parseStatus: ParseStatus.SUCCESS,
-              transactedAt: parsedData.date || new Date(),
-            },
-          });
-          transactionId = t.id;
-        }
-
-        const failureReason = parsedData.reason
-          ? parsedData.reason.substring(0, 450)
-          : null;
-
-        await tx.emailLog.create({
-          data: {
+      let categoryId: string | null = null;
+      if (parsedData.status === ParseStatus.SUCCESS && parsedData.amount && parsedData.category) {
+        const category = await this.prisma.category.findFirst({
+          where: {
             userId,
-            transactionId,
-            gmailMessageId: messageId,
-            senderEmail: fromHeader,
-            subject: subjectHeader,
-            parseStatus: parsedData.status,
-            failureReason,
-            receivedAt: new Date(
-              parseInt(message.internalDate || Date.now().toString()),
-            ),
-            processedAt: new Date(),
+            name: { equals: parsedData.category },
           },
         });
-      });
+
+        if (category) {
+          categoryId = category.id;
+        } else {
+          const fallbackName =
+            parsedData.type === TransactionType.INCOME
+              ? 'Lainnya (Pemasukan)'
+              : 'Lainnya (Pengeluaran)';
+
+          const fallbackCategory = await this.prisma.category.findFirst({
+            where: {
+              userId,
+              name: { contains: fallbackName },
+            },
+          });
+          if (fallbackCategory) {
+            categoryId = fallbackCategory.id;
+          }
+        }
+      }
+
+      await this.prisma.$transaction(
+        async (tx: Prisma.TransactionClient) => {
+          let transactionId: string | null = null;
+          if (parsedData.status === ParseStatus.SUCCESS && parsedData.amount) {
+            const t = await tx.transaction.create({
+              data: {
+                userId,
+                categoryId,
+                amount: parsedData.amount,
+                transactionType: parsedData.type as string,
+                merchant: parsedData.merchant,
+                bankSource: parsedData.bankSource,
+                source: TransactionSource.AUTO_PARSED,
+                parseStatus: ParseStatus.SUCCESS,
+                transactedAt: parsedData.date || new Date(),
+              },
+            });
+            transactionId = t.id;
+          }
+
+          const failureReason = parsedData.reason
+            ? parsedData.reason.substring(0, 450)
+            : null;
+
+          await tx.emailLog.create({
+            data: {
+              userId,
+              transactionId,
+              gmailMessageId: messageId,
+              senderEmail: fromHeader,
+              subject: subjectHeader,
+              parseStatus: parsedData.status,
+              failureReason,
+              receivedAt: new Date(
+                parseInt(message.internalDate || Date.now().toString()),
+              ),
+              processedAt: new Date(),
+            },
+          });
+        },
+        { maxWait: 10000, timeout: 20000 },
+      );
     } catch (error: unknown) {
       const isPrismaUniqueError =
         error &&
