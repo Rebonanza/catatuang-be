@@ -294,6 +294,58 @@ export class GmailService {
     return { success: true };
   }
 
+  /**
+   * Extracts plain-text body from a Gmail message payload.
+   * Tries text/plain first, falls back to text/html stripped of tags.
+   * Returns at most maxChars characters to keep the AI prompt concise.
+   */
+  private extractEmailBody(
+    payload: gmail_v1.Schema$MessagePart | undefined,
+    maxChars = 3000,
+  ): string {
+    if (!payload) return '';
+
+    const collectParts = (
+      part: gmail_v1.Schema$MessagePart,
+    ): gmail_v1.Schema$MessagePart[] => {
+      const parts: gmail_v1.Schema$MessagePart[] = [part];
+      if (part.parts) {
+        for (const child of part.parts) {
+          parts.push(...collectParts(child));
+        }
+      }
+      return parts;
+    };
+
+    const allParts = collectParts(payload);
+
+    // Prefer text/plain
+    const plainPart = allParts.find((p) => p.mimeType === 'text/plain');
+    if (plainPart?.body?.data) {
+      const decoded = Buffer.from(plainPart.body.data, 'base64').toString(
+        'utf8',
+      );
+      return decoded.substring(0, maxChars);
+    }
+
+    // Fallback: text/html stripped of tags
+    const htmlPart = allParts.find((p) => p.mimeType === 'text/html');
+    if (htmlPart?.body?.data) {
+      const decoded = Buffer.from(htmlPart.body.data, 'base64').toString(
+        'utf8',
+      );
+      const stripped = decoded
+        .replace(/<style[^>]*>.*?<\/style>/gis, '')
+        .replace(/<script[^>]*>.*?<\/script>/gis, '')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      return stripped.substring(0, maxChars);
+    }
+
+    return '';
+  }
+
   private async processMessage(
     gmail: gmail_v1.Gmail,
     userId: string,
@@ -309,6 +361,7 @@ export class GmailService {
       const messageRes = await gmail.users.messages.get({
         userId: 'me',
         id: messageId,
+        format: 'full', // ensure payload parts are returned
       });
 
       const message = messageRes.data;
@@ -319,11 +372,14 @@ export class GmailService {
         headers.find((h) => h.name === 'Subject')?.value || 'No Subject';
       const snippet = message.snippet || '';
 
+      // Use full body for accurate AI parsing; fall back to snippet if empty
+      const emailBody = this.extractEmailBody(message.payload) || snippet;
+
       if (
         !this.parserService.isPossibleTransaction(
           fromHeader,
           subjectHeader,
-          snippet,
+          snippet, // snippet is sufficient for the lightweight keyword check
         )
       ) {
         return;
@@ -341,7 +397,7 @@ export class GmailService {
       const parsedData = await this.parserService.parseEmail(
         fromHeader,
         subjectHeader,
-        snippet,
+        emailBody, // full body instead of snippet
       );
 
       // Add a small delay after a successful AI call to respect rate limits

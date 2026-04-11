@@ -45,35 +45,54 @@ export class AiParser {
     snippet: string,
   ): Promise<GeminiParsedResponse> {
     const prompt = `
-      Extract transaction data from this Indonesian bank email notification.
+      You are a financial data extractor specialized in Indonesian bank and e-wallet email notifications.
+      Analyze the following email and extract transaction data.
+
       From: ${from}
       Subject: ${subject}
-      Snippet: ${snippet}
+      Email Body:
+      ---
+      ${snippet}
+      ---
 
-      Rules:
-      1. CRITICAL: Distinguish between a real TRANSACTION notification and a PROMOTION/ADVERTISEMENT.
-      2. A real transaction must have a clear amount that was deducted, added, or paid.
-      3. If the email is a promotion, newsletter, offer, or advertisement (e.g., Spotify ads, 'Try Premium' offers, marketing newsletters), set status to 'failed' and reason to 'promotion'.
-      4. If it's a real money transfer, payment, or expense, type is 'expense'.
-      5. If it's a real received transfer or balance addition, type is 'income'.
-      6. If no transaction data found or it is clearly not a financial transaction, set status to 'failed'.
-      7. If a valid transaction is found, set status to 'success'.
-      8. Amount must be a number or null.
-      9. Merchant is the destination of the payment or source of income.
-      10. BankSource is the bank/wallet name (e.g., BCA, Mandiri, GoPay, OVO).
-      11. Date must be in ISO format or null.
-      12. Category must be one of: 'Makan & Minum', 'Transport', 'Belanja', 'Tagihan & Utilitas', 'Kesehatan', 'Hiburan', 'Pendidikan', 'Gaji', 'Transfer Masuk'. Find the most suitable.
+      CLASSIFICATION RULES (apply in order):
 
-      Respond in JSON format:
+      1. REAL TRANSACTION indicators (set status = 'success'):
+         - Contains a clear Rupiah amount (e.g., "Rp 150.000", "IDR 50.000", "sebesar Rp", "senilai Rp")
+         - Keywords: "transaksi", "pembayaran", "transfer", "debit", "kredit", "tagihan", "berhasil",
+           "notifikasi", "mutasi", "penarikan", "top up", "pembelian", "cicilan"
+         - Sent from official bank/wallet domains: bca.co.id, bankmandiri.co.id, bni.co.id, bri.co.id,
+           gopay.co.id, tokopedia.com, dana.id, ovo.id, shopee.co.id, jenius.com, livin.id, jago.com
+
+      2. PROMOTION/ADVERTISEMENT indicators (set status = 'failed', reason = 'promotion'):
+         - No specific Rupiah amount tied to an actual completed transaction
+         - Keywords like: "promo", "diskon", "cashback penawaran", "gratis", "hadiah", "daftar sekarang",
+           "coba gratis", "upgrade", "newsletter", "penawaran spesial"
+         - Email is clearly an offer, advertisement, or marketing campaign
+
+      3. If a real transaction is found:
+         - type = 'expense' for payments, purchases, transfers out, debit
+         - type = 'income' for received transfers, top-up received, salary credit
+
+      4. amount: extract only the numeric value (e.g., "Rp 150.000" → 150000). Must be a number or null.
+      5. merchant: destination of payment or source of income (e.g., "Tokopedia", "PLN", "Pak Budi")
+      6. bankSource: the bank or e-wallet name (e.g., "BCA", "GoPay", "OVO", "Mandiri")
+      7. date: transaction date in ISO 8601 format, or null if not found
+      8. category: choose the BEST match from this list only:
+         'Makan & Minum', 'Transport', 'Belanja', 'Tagihan & Utilitas', 'Kesehatan',
+         'Hiburan', 'Pendidikan', 'Gaji', 'Transfer Masuk'
+      9. reason: only set when status = 'failed' (e.g., 'promotion', 'no_amount', 'not_transaction')
+
+      Respond ONLY with valid JSON in this exact format:
       {
         "status": "success" | "failed",
-        "type": "expense" | "income",
-        "amount": number,
-        "merchant": string,
-        "bankSource": string,
-        "date": "ISOString",
-        "category": string,
-        "reason": string
+        "type": "expense" | "income" | null,
+        "amount": number | null,
+        "merchant": string | null,
+        "bankSource": string | null,
+        "date": "ISOString" | null,
+        "category": string | null,
+        "reason": string | null
       }
     `;
 
