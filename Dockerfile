@@ -43,17 +43,21 @@ COPY package.json pnpm-lock.yaml ./
 # Install ONLY production dependencies
 RUN pnpm install --prod --no-frozen-lockfile
 
-# Copy built files, prisma schemas, and config from base stage
+# Copy built files, prisma schemas, config, and entrypoint from base stage
 COPY --from=base /app/dist ./dist
 COPY --from=base /app/prisma ./prisma
 COPY --from=base /app/prisma.config.ts ./
+COPY --from=base /app/entrypoint.sh ./entrypoint.sh
 
 # Generate Prisma Client in production node_modules — no DATABASE_URL needed
 RUN pnpm prisma generate
 
+# Make entrypoint executable
+RUN chmod +x entrypoint.sh
+
 # Expose the default port (Koyeb overrides PORT at runtime)
 EXPOSE 3000
 
-# Start the application — apply pending migrations then start the node process
-# DATABASE_URL is injected at runtime by the platform (Koyeb env vars)
-CMD ["sh", "-c", "pnpm prisma migrate deploy && node dist/src/main"]
+# Entrypoint: baselines initial migration (for db push DBs), then applies
+# pending migrations, then starts the app. DATABASE_URL injected by Koyeb.
+CMD ["sh", "entrypoint.sh"]
