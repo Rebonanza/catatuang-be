@@ -19,8 +19,9 @@ RUN pnpm install --no-frozen-lockfile
 # Copy source code and other required files
 COPY . .
 
-# Generate Prisma Client (uses dummy URL for build-time validation)
-RUN DATABASE_URL="mysql://dummy:dummy@localhost:3306/dummy" pnpm prisma generate
+# Generate Prisma Client — Prisma v7 does NOT need DATABASE_URL for generate
+# (URL is managed via prisma.config.ts and only needed at runtime for migrate)
+RUN pnpm prisma generate
 
 # Build the application
 RUN pnpm build
@@ -42,16 +43,17 @@ COPY package.json pnpm-lock.yaml ./
 # Install ONLY production dependencies
 RUN pnpm install --prod --no-frozen-lockfile
 
-# Copy built files and prisma from base stage
+# Copy built files, prisma schemas, and config from base stage
 COPY --from=base /app/dist ./dist
 COPY --from=base /app/prisma ./prisma
 COPY --from=base /app/prisma.config.ts ./
 
-# Generate Prisma Client in the production node_modules
-RUN DATABASE_URL="mysql://dummy:dummy@localhost:3306/dummy" pnpm prisma generate
+# Generate Prisma Client in production node_modules — no DATABASE_URL needed
+RUN pnpm prisma generate
 
 # Expose the default port (Koyeb overrides PORT at runtime)
 EXPOSE 3000
 
 # Start the application — apply pending migrations then start the node process
+# DATABASE_URL is injected at runtime by the platform (Koyeb env vars)
 CMD ["sh", "-c", "pnpm prisma migrate deploy && node dist/src/main"]
