@@ -53,5 +53,5 @@ RUN DATABASE_URL="mysql://dummy:dummy@localhost:3306/dummy" pnpm prisma generate
 # Expose the default port (Koyeb overrides PORT at runtime)
 EXPOSE 3000
 
-# Start the application with schema synchronization
-CMD ["sh", "-c", "DATABASE_URL=$DATABASE_URL pnpm prisma db push && node dist/src/main"]
+# Start the application — apply pending migrations then start the node process
+CMD ["sh", "-c", "pnpm prisma migrate deploy && node dist/src/main"]

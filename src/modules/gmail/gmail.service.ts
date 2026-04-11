@@ -186,8 +186,15 @@ export class GmailService {
       });
 
       let processedCount = 0;
+      // Track the latest historyId seen so we don't re-process on the next sync
+      let latestHistoryId: string | null = null;
+
       if (historyRes.data.history) {
         for (const historyRecord of historyRes.data.history) {
+          // historyId on each record is a string number; keep the largest one
+          if (historyRecord.id) {
+            latestHistoryId = historyRecord.id;
+          }
           if (historyRecord.messagesAdded) {
             for (const msgAdded of historyRecord.messagesAdded) {
               if (msgAdded.message?.id) {
@@ -199,13 +206,17 @@ export class GmailService {
         }
       }
 
+      // Also use the top-level historyId from the response if available
+      if (historyRes.data.historyId) {
+        latestHistoryId = historyRes.data.historyId;
+      }
+
       await this.prisma.gmailToken.update({
         where: { id: token.id },
         data: {
           lastSyncedAt: new Date(),
-          // We don't necessarily update historyId here unless we get a NEW one from the response
-          // But usually history.list results include the new historyId in headers or elsewhere?
-          // Actually, we can get it from the latest message or the history itself
+          // Advance the historyId baseline so the next sync starts from here
+          ...(latestHistoryId ? { historyId: latestHistoryId } : {}),
         },
       });
 
