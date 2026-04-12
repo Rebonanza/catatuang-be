@@ -11,6 +11,7 @@ import {
   TransactionType,
 } from '../../common/constants/transaction.constant';
 import { GmailParserService } from './gmail-parser.service';
+import { NotificationService } from '../notifications/notification.service';
 
 @Injectable()
 export class GmailService {
@@ -21,6 +22,7 @@ export class GmailService {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly parserService: GmailParserService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   private getOAuth2Client(
@@ -478,6 +480,9 @@ export class GmailService {
         },
         { maxWait: 10000, timeout: 20000 },
       );
+
+      // Trigger notification
+      this.notificationService.notifyTransactionProcessed(userId);
     } catch (error: unknown) {
       const isPrismaUniqueError =
         error &&

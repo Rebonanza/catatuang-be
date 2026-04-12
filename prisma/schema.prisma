@@ -21,6 +21,8 @@ model User {
   categories     Category[]
   transactions   Transaction[]
   emailLogs      EmailLog[]
+  fcmTokens      FcmToken[]
+
 
   @@map("users")
 }
@@ -113,4 +115,17 @@ model EmailLog {
   transaction     Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
 
   @@map("email_logs")
+}
+
+model FcmToken {
+  id        String   @id @default(uuid()) @db.Char(36)
+  userId    String   @map("user_id") @db.Char(36)
+  token     String   @unique @db.VarChar(500)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("fcm_tokens")
 }

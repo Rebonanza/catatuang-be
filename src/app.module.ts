@@ -7,6 +7,7 @@ import { GmailModule } from './modules/gmail/gmail.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { TransactionsModule } from './modules/transactions/transactions.module';
 import { HealthModule } from './modules/health/health.module';
+import { NotificationModule } from './modules/notifications/notification.module';
 
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
@@ -27,6 +28,7 @@ import { APP_GUARD } from '@nestjs/core';
     CategoriesModule,
     TransactionsModule,
     HealthModule,
+    NotificationModule,
   ],
   providers: [
     {
