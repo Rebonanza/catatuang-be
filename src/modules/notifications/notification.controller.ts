@@ -13,7 +13,7 @@ export class NotificationController {
   @Post('token')
   @ApiOperation({ summary: 'Register FCM device token' })
   async registerToken(@Request() req: any, @Body() body: { token: string }) {
-    await this.notificationService.saveToken(req.user.id, body.token);
+    await this.notificationService.saveToken(req.user.sub, body.token);
     return { success: true };
   }
 }
