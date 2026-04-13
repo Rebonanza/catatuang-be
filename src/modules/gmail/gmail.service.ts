@@ -290,7 +290,7 @@ export class GmailService {
         },
       });
     } catch (error) {
-      this.logger.error('Failed processing history', error);
+      // Optional: Handle error silently or store it elsewhere if needed
     }
 
     return { success: true };
