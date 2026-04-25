@@ -7,19 +7,15 @@ import {
 import { GmailParserService } from './gmail-parser.service';
 import { AiParser, GeminiParsedResponse } from './parsers/ai.parser';
 
-jest.mock('./parsers/ai.parser');
-
 describe('GmailParserService', () => {
   let service: GmailParserService;
   let mockAiParser: jest.Mocked<AiParser>;
 
   beforeEach(() => {
-    const mockConfigService = {
-      get: jest.fn().mockReturnValue('mock-api-key'),
-    };
-    service = new GmailParserService(mockConfigService as any);
-    service.onModuleInit();
-    mockAiParser = (service as any).aiParser;
+    mockAiParser = {
+      parse: jest.fn(),
+    } as any;
+    service = new GmailParserService(mockAiParser);
   });
 
   describe('isPossibleTransaction', () => {
@@ -55,6 +51,28 @@ describe('GmailParserService', () => {
           'Here is your weekly tech news.',
         ),
       ).toBe(false);
+    });
+  });
+
+  describe('parseBankSource', () => {
+    it('should normalize and return BankSource', () => {
+      expect((service as any).parseBankSource('BCA')).toBe(BankSource.BCA);
+      expect((service as any).parseBankSource('bca')).toBe(BankSource.BCA);
+      expect((service as any).parseBankSource('m-BCA')).toBe(BankSource.BCA);
+      expect((service as any).parseBankSource('Mandiri Online')).toBe(
+        BankSource.MANDIRI,
+      );
+      expect((service as any).parseBankSource('Bank Mandiri')).toBe(
+        BankSource.MANDIRI,
+      );
+      expect((service as any).parseBankSource('GoPay')).toBe(BankSource.GOPAY);
+      expect((service as any).parseBankSource('OVO')).toBe(BankSource.OVO);
+      expect((service as any).parseBankSource('Dana')).toBe(BankSource.DANA);
+    });
+
+    it('should return undefined for unknown or null sources', () => {
+      expect((service as any).parseBankSource('unknown-bank')).toBeUndefined();
+      expect((service as any).parseBankSource(null)).toBeUndefined();
     });
   });
 

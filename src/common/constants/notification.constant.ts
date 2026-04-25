@@ -1,0 +1,4 @@
+export enum NotificationType {
+  TRANSACTION_PROCESSED = 'TRANSACTION_PROCESSED',
+  GENERAL_INFO = 'GENERAL_INFO',
+}

@@ -6,13 +6,20 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
+import { CategoryResponseDto } from './dto/category-response.dto';
+import { ApiResponse } from '../../common/interfaces/api-response.interface';
+import { Prisma, Category } from '@prisma/client';
+import { TransactionType } from '../../common/constants/transaction.constant';
 
 @Injectable()
 export class CategoriesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(userId: string, dto: CreateCategoryDto) {
-    return this.prisma.category.create({
+  async create(
+    userId: string,
+    dto: CreateCategoryDto,
+  ): Promise<ApiResponse<CategoryResponseDto>> {
+    const category = await this.prisma.category.create({
       data: {
         userId,
         name: dto.name,
@@ -22,14 +29,22 @@ export class CategoriesService {
         isDefault: false,
       },
     });
+
+    return {
+      success: true,
+      data: this.mapToResponseDto(category),
+    };
   }
 
-  async findAll(userId: string, filter?: { page?: string; limit?: string }) {
+  async findAll(
+    userId: string,
+    filter?: { page?: string; limit?: string },
+  ): Promise<ApiResponse<CategoryResponseDto[]>> {
     const page = filter?.page ? parseInt(filter.page) : 1;
     const limit = filter?.limit ? parseInt(filter.limit) : 20;
     const skip = (page - 1) * limit;
 
-    const whereClause = { userId };
+    const whereClause: Prisma.CategoryWhereInput = { userId };
 
     const [data, total] = await Promise.all([
       this.prisma.category.findMany({
@@ -42,7 +57,8 @@ export class CategoriesService {
     ]);
 
     return {
-      data,
+      success: true,
+      data: data.map((item) => this.mapToResponseDto(item)),
       meta: {
         total,
         page,
@@ -52,19 +68,28 @@ export class CategoriesService {
     };
   }
 
-  async update(userId: string, id: string, dto: UpdateCategoryDto) {
+  async update(
+    userId: string,
+    id: string,
+    dto: UpdateCategoryDto,
+  ): Promise<ApiResponse<CategoryResponseDto>> {
     const category = await this.prisma.category.findFirst({
       where: { id, userId },
     });
     if (!category) throw new NotFoundException('Category not found');
 
-    return this.prisma.category.update({
+    const updatedCategory = await this.prisma.category.update({
       where: { id },
       data: dto,
     });
+
+    return {
+      success: true,
+      data: this.mapToResponseDto(updatedCategory),
+    };
   }
 
-  async remove(userId: string, id: string) {
+  async remove(userId: string, id: string): Promise<ApiResponse> {
     const category = await this.prisma.category.findFirst({
       where: { id, userId },
     });
@@ -72,7 +97,7 @@ export class CategoriesService {
     if (category.isDefault)
       throw new BadRequestException('Cannot delete default category');
 
-    return this.prisma.$transaction(
+    await this.prisma.$transaction(
       async (tx) => {
         // Nullify categoryId in transactions
         await tx.transaction.updateMany({
@@ -81,9 +106,24 @@ export class CategoriesService {
         });
 
         // Delete the category
-        return tx.category.delete({ where: { id } });
+        await tx.category.delete({ where: { id } });
       },
       { maxWait: 5000, timeout: 10000 },
     );
+
+    return { success: true };
+  }
+
+  private mapToResponseDto(category: Category): CategoryResponseDto {
+    return {
+      id: category.id,
+      userId: category.userId,
+      name: category.name,
+      icon: category.icon,
+      color: category.color,
+      transactionType: category.transactionType as TransactionType,
+      isDefault: category.isDefault,
+      createdAt: category.createdAt,
+    };
   }
 }

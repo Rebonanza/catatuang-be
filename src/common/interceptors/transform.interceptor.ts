@@ -17,14 +17,17 @@ export interface Response<T> {
 @Injectable()
 export class TransformInterceptor<T> implements NestInterceptor<
   T,
-  Response<T>
+  Response<T> | T
 > {
-  intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
+  intercept(
+    context: ExecutionContext,
+    next: CallHandler,
+  ): Observable<Response<T> | T> {
     const httpContext = context.switchToHttp();
     const response = httpContext.getResponse<FastifyReply>();
 
     return next.handle().pipe(
-      map((data: unknown): any => {
+      map((data: T): Response<T> | T => {
         // Skip wrapping for redirects (status 3xx)
         // OR if it's a redirect configuration object (has url property)
         if (
@@ -61,7 +64,7 @@ export class TransformInterceptor<T> implements NestInterceptor<
 
         return {
           success: true,
-          data: data as T,
+          data,
         };
       }),
     );

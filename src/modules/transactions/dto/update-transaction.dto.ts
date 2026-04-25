@@ -1,4 +1,12 @@
-import { IsNumber, IsOptional, IsString } from 'class-validator';
+import {
+  IsDate,
+  IsEnum,
+  IsNumber,
+  IsOptional,
+  IsString,
+} from 'class-validator';
+import { Type } from 'class-transformer';
+import { TransactionType } from '../../../common/constants/transaction.constant';
 
 export class UpdateTransactionDto {
   @IsString()
@@ -9,9 +17,9 @@ export class UpdateTransactionDto {
   @IsOptional()
   amount?: number;
 
-  @IsString()
+  @IsEnum(TransactionType)
   @IsOptional()
-  transactionType?: string;
+  transactionType?: TransactionType;
 
   @IsString()
   @IsOptional()
@@ -21,7 +29,8 @@ export class UpdateTransactionDto {
   @IsOptional()
   note?: string;
 
-  @IsString()
   @IsOptional()
-  transactedAt?: string;
+  @Type(() => Date)
+  @IsDate()
+  transactedAt?: Date;
 }

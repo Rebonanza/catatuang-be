@@ -44,6 +44,7 @@ model RefreshToken {
 model GmailToken {
   id                    String    @id @default(uuid()) @db.Char(36)
   userId                String    @unique @map("user_id") @db.Char(36)
+  email                 String    @map("email") @db.VarChar(255)
   accessTokenEncrypted  String    @map("access_token_encrypted") @db.Text
   refreshTokenEncrypted String    @map("refresh_token_encrypted") @db.Text
   tokenExpiresAt        DateTime  @map("token_expires_at")
@@ -55,6 +56,7 @@ model GmailToken {
 
   user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([email])
   @@map("gmail_tokens")
 }
 

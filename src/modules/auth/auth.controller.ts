@@ -14,55 +14,62 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { ConfigService } from '@nestjs/config';
+import {
+  TokenResponse,
+  MeResponse,
+} from './interfaces/auth-response.interface';
+import { ApiResponse } from '../../common/interfaces/api-response.interface';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
-import { GoogleAuthGuard } from '../../common/guards/google-auth.guard';
-import type {
-  AuthenticatedRequest,
-  GoogleAuthenticatedRequest,
-} from '../../common/interfaces/request.interface';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import type { GoogleAuthenticatedRequest } from '../../common/interfaces/request.interface';
+import { GoogleAuthGuard } from 'src/common/guards/google-auth.guard';
 
-@Controller('auth')
+@Controller({ version: '1', path: 'auth' })
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly configService: ConfigService,
+  ) {}
 
   @Post('register')
-  register(@Body() dto: RegisterDto) {
+  register(@Body() dto: RegisterDto): Promise<TokenResponse> {
     return this.authService.register(dto);
   }
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  login(@Body() dto: LoginDto) {
+  login(@Body() dto: LoginDto): Promise<TokenResponse> {
     return this.authService.login(dto);
   }
 
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  refresh(@Body() dto: RefreshTokenDto) {
+  refresh(@Body() dto: RefreshTokenDto): Promise<TokenResponse> {
     return this.authService.refresh(dto.refreshToken);
   }
 
   @UseGuards(JwtAuthGuard)
   @Post('logout')
   @HttpCode(HttpStatus.OK)
-  logout(@Req() req: AuthenticatedRequest) {
-    return this.authService.logout(req.user.sub);
+  logout(@CurrentUser('id') userId: string): Promise<ApiResponse> {
+    return this.authService.logout(userId);
   }
 
   @UseGuards(JwtAuthGuard)
   @Get('me')
-  getMe(@Req() req: AuthenticatedRequest) {
-    return this.authService.getMe(req.user.sub);
+  getMe(@CurrentUser('id') userId: string): Promise<MeResponse> {
+    return this.authService.getMe(userId);
   }
 
   @UseGuards(JwtAuthGuard)
   @Post('change-password')
   @HttpCode(HttpStatus.OK)
   changePassword(
-    @Req() req: AuthenticatedRequest,
+    @CurrentUser('id') userId: string,
     @Body() dto: ChangePasswordDto,
-  ) {
-    return this.authService.changePassword(req.user.sub, dto);
+  ): Promise<ApiResponse> {
+    return this.authService.changePassword(userId, dto);
   }
 
   @Get('google')
@@ -75,7 +82,8 @@ export class AuthController {
   @UseGuards(GoogleAuthGuard)
   @Redirect()
   googleAuthRedirect(@Req() req: GoogleAuthenticatedRequest) {
-    const url = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const url =
+      this.configService.get<string>('FRONTEND_URL') || 'http://localhost:5173';
     if (!req.user) {
       return {
         url: `${url}/login?error=no_user`,

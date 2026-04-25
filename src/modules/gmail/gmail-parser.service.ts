@@ -1,77 +1,84 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Injectable } from '@nestjs/common';
 import {
   ParseStatus,
-  TransactionType,
   BankSource,
 } from '../../common/constants/transaction.constant';
 import { ParsedTransaction } from './parsers/base.parser';
 import { AiParser } from './parsers/ai.parser';
 
 @Injectable()
-export class GmailParserService implements OnModuleInit {
-  private aiParser: AiParser | null = null;
+export class GmailParserService {
+  private readonly financialKeywords = [
+    'rp',
+    'idr',
+    'bayar',
+    'pembayaran',
+    'transaksi',
+    'transfer',
+    'dana',
+    'gopay',
+    'ovo',
+    'shopeepay',
+    'm-banking',
+    'tagihan',
+    'struk',
+    'receipt',
+    'invoice',
+    'spent',
+    'received',
+    'expense',
+    'income',
+  ];
 
-  constructor(private readonly configService: ConfigService) {}
+  private readonly financialSenders = [
+    'bca.co.id',
+    'mandiri',
+    'bri.co.id',
+    'gojek.com',
+    'ovo.id',
+    'dana.id',
+    'shopee.co.id',
+    'tokopedia.com',
+    'grab.com',
+  ];
 
-  onModuleInit() {
-    this.aiParser = new AiParser(this.configService);
-  }
+  constructor(private readonly aiParser: AiParser) {}
 
   isPossibleTransaction(
     from: string,
     subject: string,
     snippet: string,
   ): boolean {
-    const financialKeywords = [
-      'rp',
-      'idr',
-      'bayar',
-      'pembayaran',
-      'transaksi',
-      'transfer',
-      'dana',
-      'gopay',
-      'ovo',
-      'shopeepay',
-      'm-banking',
-      'tagihan',
-      'struk',
-      'receipt',
-      'invoice',
-      'spent',
-      'received',
-      'expense',
-      'income',
-    ];
-
     const lowerSubject = subject.toLowerCase();
     const lowerSnippet = snippet.toLowerCase();
     const lowerFrom = from.toLowerCase();
 
     // Check if any keyword matches subject or snippet
-    const hasKeyword = financialKeywords.some(
+    const hasKeyword = this.financialKeywords.some(
       (kw) => lowerSubject.includes(kw) || lowerSnippet.includes(kw),
     );
 
     // List of known transaction senders (can be expanded)
-    const financialSenders = [
-      'bca.co.id',
-      'mandiri',
-      'bri.co.id',
-      'gojek.com',
-      'ovo.id',
-      'dana.id',
-      'shopee.co.id',
-      'tokopedia.com',
-      'grab.com',
-    ];
-
-    const isFinancialSender = financialSenders.some((sender) =>
+    const isFinancialSender = this.financialSenders.some((sender) =>
       lowerFrom.includes(sender),
     );
 
     return hasKeyword || isFinancialSender;
+  }
+
+  private parseBankSource(source: string | null): BankSource | undefined {
+    if (!source) return undefined;
+
+    const normalized = source.toLowerCase().replace(/[^a-z]/g, '');
+
+    if (normalized.includes('bca')) return BankSource.BCA;
+    if (normalized.includes('bri')) return BankSource.BRI;
+    if (normalized.includes('mandiri')) return BankSource.MANDIRI;
+    if (normalized.includes('gopay')) return BankSource.GOPAY;
+    if (normalized.includes('ovo')) return BankSource.OVO;
+    if (normalized.includes('dana')) return BankSource.DANA;
+
+    return undefined;
   }
 
   async parseEmail(
@@ -80,22 +87,15 @@ export class GmailParserService implements OnModuleInit {
     snippet: string,
   ): Promise<ParsedTransaction> {
     try {
-      if (!this.aiParser) {
-        return {
-          status: ParseStatus.FAILED,
-          reason: 'AI Parser not initialized (GEMINI_API_KEY missing)',
-        };
-      }
-
       const result = await this.aiParser.parse(from, subject, snippet);
+
       return {
-        ...result,
-        status: result.status as ParseStatus,
-        type: result.type as TransactionType,
+        status: result.status,
+        type: result.type ?? undefined,
         date: result.date ? new Date(result.date) : undefined,
         amount: result.amount ?? undefined,
         merchant: result.merchant ?? undefined,
-        bankSource: result.bankSource as BankSource,
+        bankSource: this.parseBankSource(result.bankSource),
         category: result.category ?? undefined,
         reason: result.reason ?? undefined,
       };

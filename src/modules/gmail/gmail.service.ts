@@ -1,10 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { gmail_v1, google } from 'googleapis';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
-import * as crypto from 'crypto';
+import { EncryptionService } from '../../common/services/encryption.service';
 import {
   TransactionSource,
   ParseStatus,
@@ -12,23 +12,43 @@ import {
 } from '../../common/constants/transaction.constant';
 import { GmailParserService } from './gmail-parser.service';
 import { NotificationService } from '../notifications/notification.service';
+import { NotificationType } from '../../common/constants/notification.constant';
+import {
+  GmailActionResponse,
+  GmailStatusResponse,
+  GmailSyncResponse,
+  GmailWatchResponse,
+} from './interfaces/gmail-response.interface';
+import {
+  NotFoundException,
+  ForbiddenException,
+  InternalServerErrorException,
+} from '@nestjs/common';
 
 @Injectable()
-export class GmailService {
+export class GmailService implements OnModuleDestroy {
   private readonly logger = new Logger(GmailService.name);
-  private readonly processingMessages = new Set<string>();
+  private readonly processingMessages = new Map<string, NodeJS.Timeout>();
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly parserService: GmailParserService,
     private readonly notificationService: NotificationService,
+    private readonly encryptionService: EncryptionService,
   ) {}
 
-  private getOAuth2Client(
-    userId: string,
-    tokens?: { accessTokenEncrypted: string; refreshTokenEncrypted: string },
-  ) {
+  onModuleDestroy() {
+    for (const timeout of this.processingMessages.values()) {
+      clearTimeout(timeout);
+    }
+    this.processingMessages.clear();
+  }
+
+  private getOAuth2Client(tokens?: {
+    accessTokenEncrypted: string;
+    refreshTokenEncrypted: string;
+  }) {
     const oAuth2Client = new google.auth.OAuth2(
       this.configService.get<string>('GOOGLE_CLIENT_ID'),
       this.configService.get<string>('GOOGLE_CLIENT_SECRET'),
@@ -36,28 +56,12 @@ export class GmailService {
     );
 
     if (tokens) {
-      const decrypt = (encryptedText: string) => {
-        if (!encryptedText) return '';
-        const [ivHex, authTagHex, encHex] = encryptedText.split(':');
-        if (!ivHex || !authTagHex || !encHex) return '';
-        const iv = Buffer.from(ivHex, 'hex');
-        const authTag = Buffer.from(authTagHex, 'hex');
-        const aesKey = crypto
-          .createHash('sha256')
-          .update(this.configService.get<string>('JWT_SECRET') || 'secret')
-          .digest();
-
-        const decipher = crypto.createDecipheriv('aes-256-gcm', aesKey, iv);
-        decipher.setAuthTag(authTag);
-        let dec = decipher.update(encHex, 'hex', 'utf8');
-        dec += decipher.final('utf8');
-        return dec;
-      };
-
       oAuth2Client.setCredentials({
-        access_token: decrypt(tokens.accessTokenEncrypted),
+        access_token: this.encryptionService.decrypt(
+          tokens.accessTokenEncrypted,
+        ),
         refresh_token: tokens.refreshTokenEncrypted
-          ? decrypt(tokens.refreshTokenEncrypted)
+          ? this.encryptionService.decrypt(tokens.refreshTokenEncrypted)
           : undefined,
       });
     }
@@ -65,15 +69,15 @@ export class GmailService {
     return oAuth2Client;
   }
 
-  async startWatch(userId: string) {
+  async startWatch(userId: string): Promise<GmailWatchResponse> {
     const tokenRecord = await this.prisma.gmailToken.findUnique({
       where: { userId },
     });
     if (!tokenRecord) {
-      return { success: false, message: 'Google account not connected' };
+      throw new NotFoundException('Google account not connected');
     }
 
-    const auth = this.getOAuth2Client(userId, tokenRecord);
+    const auth = this.getOAuth2Client(tokenRecord);
     const gmail = google.gmail({ version: 'v1', auth });
 
     try {
@@ -90,40 +94,41 @@ export class GmailService {
       const expiryDate = new Date();
       expiryDate.setDate(expiryDate.getDate() + 7); // Watch expires in 7 days
 
-      await this.prisma.gmailToken.update({
-        where: { userId },
+      return {
+        success: true,
         data: {
-          historyId: res.data.historyId ? res.data.historyId.toString() : null,
-          gmailWatchExpiry: expiryDate,
+          historyId: res.data.historyId,
+          expiration: res.data.expiration,
         },
-      });
-
-      return { success: true, data: res.data };
+      };
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = error instanceof Error ? error.message : 'Unknown error';
       this.logger.error(`Failed to start watch: ${message}`);
 
       const err = error as Record<string, unknown>;
-      const status = typeof err?.status === 'number' ? err.status : err?.code;
+      const status =
+        typeof err?.status === 'number'
+          ? err.status
+          : (err?.code as number | string | undefined);
 
       if (status === 403) {
-        return {
-          success: false,
-          message:
-            'Permission insufficient. Please re-connect your Google account.',
-        };
+        throw new ForbiddenException(
+          'Permission insufficient. Please re-connect your Google account.',
+        );
       }
-      throw error;
+      throw new InternalServerErrorException(
+        `Failed to start watch: ${message}`,
+      );
     }
   }
 
-  async stopWatch(userId: string) {
+  async stopWatch(userId: string): Promise<GmailActionResponse> {
     const tokenRecord = await this.prisma.gmailToken.findUnique({
       where: { userId },
     });
     if (!tokenRecord) return { success: true };
 
-    const auth = this.getOAuth2Client(userId, tokenRecord);
+    const auth = this.getOAuth2Client(tokenRecord);
     const gmail = google.gmail({ version: 'v1', auth });
 
     try {
@@ -135,49 +140,70 @@ export class GmailService {
           historyId: null,
         },
       });
-    } catch {
-      // ignore
+      return { success: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(`Failed to stop watch: ${message}`);
+      return { success: true }; // Still return success as we attempt to clean up
     }
-
-    return { success: true };
   }
 
-  async deleteToken(userId: string) {
-    await this.prisma.gmailToken.deleteMany({
-      where: { userId },
-    });
-    return { success: true };
+  async deleteToken(userId: string): Promise<GmailActionResponse> {
+    try {
+      await this.prisma.gmailToken.deleteMany({
+        where: { userId },
+      });
+      return { success: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(`Failed to delete token: ${message}`);
+      throw new InternalServerErrorException(
+        'Failed to delete Google account connection',
+      );
+    }
   }
 
-  async getStatus(userId: string) {
-    const token = await this.prisma.gmailToken.findUnique({
-      where: { userId },
-    });
-    if (!token) return { success: true, connected: false };
+  async getStatus(userId: string): Promise<GmailStatusResponse> {
+    try {
+      const token = await this.prisma.gmailToken.findUnique({
+        where: { userId },
+      });
+      if (!token)
+        return {
+          success: true,
+          data: { connected: false, watchValid: false, lastSyncedAt: null },
+        };
 
-    return {
-      success: true,
-      connected: true,
-      watchValid: token.gmailWatchExpiry
-        ? token.gmailWatchExpiry > new Date()
-        : false,
-      lastSyncedAt: token.lastSyncedAt,
-    };
+      return {
+        success: true,
+        data: {
+          connected: true,
+          watchValid: token.gmailWatchExpiry
+            ? token.gmailWatchExpiry > new Date()
+            : false,
+          lastSyncedAt: token.lastSyncedAt,
+        },
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      throw new InternalServerErrorException(
+        `Failed to get status: ${message}`,
+      );
+    }
   }
 
-  async syncNow(userId: string) {
+  async syncNow(userId: string): Promise<GmailSyncResponse> {
     const token = await this.prisma.gmailToken.findUnique({
       where: { userId },
     });
     if (!token || !token.historyId) {
-      return {
-        success: false,
-        message: 'Gmail not connected or historyId missing',
-      };
+      throw new NotFoundException(
+        'Gmail not connected or history baseline missing',
+      );
     }
 
     // We simulate a webhook-like check from the current historyId
-    const auth = this.getOAuth2Client(userId, token);
+    const auth = this.getOAuth2Client(token);
     const gmail = google.gmail({ version: 'v1', auth });
 
     try {
@@ -224,11 +250,15 @@ export class GmailService {
 
       return {
         success: true,
-        message: `Sync completed. Processed ${processedCount} messages.`,
+        data: {
+          processedCount,
+          message: `Sync completed. Processed ${processedCount} messages.`,
+        },
       };
     } catch (error) {
-      this.logger.error('Manual sync failed', error);
-      throw error;
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error('Manual sync failed', message);
+      throw new InternalServerErrorException(`Sync failed: ${message}`);
     }
   }
 
@@ -241,26 +271,28 @@ export class GmailService {
     try {
       payload = JSON.parse(
         Buffer.from(body.message.data, 'base64').toString('utf8'),
-      );
+      ) as typeof payload;
     } catch (error) {
-      this.logger.error('Failed to parse webhook payload', error);
-      return { success: false };
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(`Failed to parse webhook payload: ${message}`);
+      return { success: true }; // Return true to avoid GCP Pub/Sub retry spam
     }
 
     const { emailAddress, historyId } = payload;
     if (!emailAddress) return { success: true };
 
-    const user = await this.prisma.user.findUnique({
+    const gmailToken = await this.prisma.gmailToken.findFirst({
       where: { email: emailAddress },
-      include: { gmailToken: true },
+      include: { user: true },
     });
 
-    if (!user || !user.gmailToken) return { success: true };
+    if (!gmailToken || !gmailToken.user) return { success: true };
 
-    const startHistoryId = user.gmailToken.historyId;
+    const user = gmailToken.user;
+    const startHistoryId = gmailToken.historyId;
     if (!startHistoryId) return { success: true }; // No previous baseline
 
-    const auth = this.getOAuth2Client(user.id, user.gmailToken);
+    const auth = this.getOAuth2Client(gmailToken);
     const gmail = google.gmail({ version: 'v1', auth });
 
     try {
@@ -283,17 +315,32 @@ export class GmailService {
       }
 
       await this.prisma.gmailToken.update({
-        where: { id: user.gmailToken.id },
+        where: { id: gmailToken.id },
         data: {
           historyId: historyId ? String(historyId) : undefined,
           lastSyncedAt: new Date(),
         },
       });
     } catch (error) {
-      // Optional: Handle error silently or store it elsewhere if needed
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(`Webhook history processing failed: ${message}`);
+      return { success: true }; // Return true to avoid GCP Pub/Sub retry spam
     }
 
     return { success: true };
+  }
+
+  private collectParts(
+    part: gmail_v1.Schema$MessagePart,
+    result: gmail_v1.Schema$MessagePart[] = [],
+  ): gmail_v1.Schema$MessagePart[] {
+    result.push(part);
+    if (part.parts) {
+      for (const child of part.parts) {
+        this.collectParts(child, result);
+      }
+    }
+    return result;
   }
 
   /**
@@ -307,42 +354,33 @@ export class GmailService {
   ): string {
     if (!payload) return '';
 
-    const collectParts = (
-      part: gmail_v1.Schema$MessagePart,
-    ): gmail_v1.Schema$MessagePart[] => {
-      const parts: gmail_v1.Schema$MessagePart[] = [part];
-      if (part.parts) {
-        for (const child of part.parts) {
-          parts.push(...collectParts(child));
-        }
-      }
-      return parts;
-    };
-
-    const allParts = collectParts(payload);
+    const allParts = this.collectParts(payload);
 
     // Prefer text/plain
     const plainPart = allParts.find((p) => p.mimeType === 'text/plain');
     if (plainPart?.body?.data) {
-      const decoded = Buffer.from(plainPart.body.data, 'base64').toString(
-        'utf8',
-      );
-      return decoded.substring(0, maxChars);
+      const buffer = Buffer.from(plainPart.body.data, 'base64');
+      const maxBytes = maxChars * 3; // estimasi UTF-8 worst case
+      return buffer.slice(0, maxBytes).toString('utf8').substring(0, maxChars);
     }
 
     // Fallback: text/html stripped of tags
     const htmlPart = allParts.find((p) => p.mimeType === 'text/html');
     if (htmlPart?.body?.data) {
-      const decoded = Buffer.from(htmlPart.body.data, 'base64').toString(
-        'utf8',
-      );
+      const buffer = Buffer.from(htmlPart.body.data, 'base64');
+      const maxBytes = maxChars * 3;
+      const decoded = buffer
+        .slice(0, maxBytes)
+        .toString('utf8')
+        .substring(0, maxChars);
+
       const stripped = decoded
         .replace(/<style[^>]*>.*?<\/style>/gis, '')
         .replace(/<script[^>]*>.*?<\/script>/gis, '')
         .replace(/<[^>]+>/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
-      return stripped.substring(0, maxChars);
+      return stripped;
     }
 
     return '';
@@ -353,39 +391,58 @@ export class GmailService {
     userId: string,
     messageId: string,
   ) {
-    // Prevent duplicate processing
+    // Prevent duplicate processing with 5-minute TTL
     if (this.processingMessages.has(messageId)) {
       return;
     }
-    this.processingMessages.add(messageId);
+
+    // Set a timeout to clear the message from the map after 5 minutes
+    const timeout = setTimeout(
+      () => {
+        this.processingMessages.delete(messageId);
+      },
+      5 * 60 * 1000,
+    );
+
+    this.processingMessages.set(messageId, timeout);
 
     try {
-      const messageRes = await gmail.users.messages.get({
+      // 1. Get metadata first for lightweight pre-check
+      const metaRes = await gmail.users.messages.get({
         userId: 'me',
         id: messageId,
-        format: 'full', // ensure payload parts are returned
+        format: 'metadata',
+        metadataHeaders: ['From', 'Subject'],
       });
 
-      const message = messageRes.data;
-      const headers = message.payload?.headers || [];
+      const messageData = metaRes.data;
+      const headers = messageData.payload?.headers || [];
       const fromHeader =
         headers.find((h) => h.name === 'From')?.value || 'Unknown';
       const subjectHeader =
         headers.find((h) => h.name === 'Subject')?.value || 'No Subject';
-      const snippet = message.snippet || '';
-
-      // Use full body for accurate AI parsing; fall back to snippet if empty
-      const emailBody = this.extractEmailBody(message.payload) || snippet;
+      const snippet = messageData.snippet || '';
 
       if (
         !this.parserService.isPossibleTransaction(
           fromHeader,
           subjectHeader,
-          snippet, // snippet is sufficient for the lightweight keyword check
+          snippet,
         )
       ) {
         return;
       }
+
+      // 2. Only if possible transaction, get full content
+      const fullRes = await gmail.users.messages.get({
+        userId: 'me',
+        id: messageId,
+        format: 'full', // ensure payload parts are returned
+      });
+
+      const message = fullRes.data;
+      // Use full body for accurate AI parsing; fall back to snippet if empty
+      const emailBody = this.extractEmailBody(message.payload) || snippet;
 
       // Deduplication: Check if this message has already been processed in DB
       const existingLog = await this.prisma.emailLog.findUnique({
@@ -399,11 +456,12 @@ export class GmailService {
       const parsedData = await this.parserService.parseEmail(
         fromHeader,
         subjectHeader,
-        emailBody, // full body instead of snippet
+        emailBody,
       );
 
-      // Add a small delay after a successful AI call to respect rate limits
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const delay =
+        this.configService.get<number>('GMAIL_AI_PROCESS_DELAY_MS') || 2000;
+      await new Promise((resolve) => setTimeout(resolve, delay));
 
       let categoryId: string | null = null;
       if (
@@ -477,12 +535,14 @@ export class GmailService {
               processedAt: new Date(),
             },
           });
+          // Trigger notification
+          this.notificationService.notifyUser({
+            userId,
+            type: NotificationType.TRANSACTION_PROCESSED,
+          });
         },
         { maxWait: 10000, timeout: 20000 },
       );
-
-      // Trigger notification
-      this.notificationService.notifyTransactionProcessed(userId);
     } catch (error: unknown) {
       const isPrismaUniqueError =
         error &&
@@ -493,10 +553,10 @@ export class GmailService {
       if (isPrismaUniqueError) {
         // Skip
       } else {
-        this.logger.error(`Failed to process message ${messageId}`, error);
+        this.logger.error(
+          `Failed to process message ${messageId}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        );
       }
-    } finally {
-      this.processingMessages.delete(messageId);
     }
   }
 

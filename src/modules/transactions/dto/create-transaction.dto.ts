@@ -1,4 +1,13 @@
-import { IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
+import {
+  IsDate,
+  IsEnum,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+} from 'class-validator';
+import { Type } from 'class-transformer';
+import { TransactionType } from '../../../common/constants/transaction.constant';
 
 export class CreateTransactionDto {
   @IsString()
@@ -9,9 +18,9 @@ export class CreateTransactionDto {
   @IsNotEmpty()
   amount!: number;
 
-  @IsString()
+  @IsEnum(TransactionType)
   @IsNotEmpty()
-  transactionType!: string;
+  transactionType!: TransactionType;
 
   @IsString()
   @IsOptional()
@@ -21,7 +30,8 @@ export class CreateTransactionDto {
   @IsOptional()
   note?: string;
 
-  @IsString()
   @IsNotEmpty()
-  transactedAt!: string; // Using string ISO format
+  @Type(() => Date)
+  @IsDate()
+  transactedAt!: Date;
 }

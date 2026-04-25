@@ -2,22 +2,25 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
-
-interface TransactionFilter {
-  page?: string;
-  limit?: string;
-  startDate?: string;
-  endDate?: string;
-  transactionType?: string;
-  categoryId?: string;
-}
+import { GetTransactionsFilterDto } from './dto/get-transactions-filter.dto';
+import { TransactionResponseDto } from './dto/transaction-response.dto';
+import { ApiResponse } from '../../common/interfaces/api-response.interface';
+import { Prisma } from '@prisma/client';
+import {
+  ParseStatus,
+  TransactionSource,
+  TransactionType,
+} from '../../common/constants/transaction.constant';
 
 @Injectable()
 export class TransactionsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(userId: string, dto: CreateTransactionDto) {
-    return this.prisma.transaction.create({
+  async create(
+    userId: string,
+    dto: CreateTransactionDto,
+  ): Promise<ApiResponse<TransactionResponseDto>> {
+    const transaction = await this.prisma.transaction.create({
       data: {
         userId,
         categoryId: dto.categoryId,
@@ -25,24 +28,36 @@ export class TransactionsService {
         transactionType: dto.transactionType,
         merchant: dto.merchant,
         note: dto.note,
-        source: 'manual',
-        transactedAt: new Date(dto.transactedAt),
+        source: TransactionSource.MANUAL,
+        transactedAt: dto.transactedAt,
       },
+      include: { category: true },
     });
+
+    return {
+      success: true,
+      data: this.mapToResponseDto(transaction),
+    };
   }
 
-  async findAll(userId: string, filter?: TransactionFilter) {
+  async findAll(
+    userId: string,
+    filter?: GetTransactionsFilterDto,
+  ): Promise<ApiResponse<TransactionResponseDto[]>> {
     const page = filter?.page ? parseInt(filter.page) : 1;
     const limit = filter?.limit ? parseInt(filter.limit) : 20;
     const skip = (page - 1) * limit;
 
-    const whereClause: any = { userId };
+    const whereClause: Prisma.TransactionWhereInput = { userId };
 
     if (filter?.startDate && filter?.endDate) {
-      whereClause.transactedAt = {
-        gte: new Date(filter.startDate as string),
-        lte: new Date(filter.endDate as string),
-      };
+      const gte = new Date(filter.startDate);
+      gte.setHours(0, 0, 0, 0);
+
+      const lte = new Date(filter.endDate);
+      lte.setHours(23, 59, 59, 999);
+
+      whereClause.transactedAt = { gte, lte };
     }
     if (filter?.transactionType) {
       whereClause.transactionType = filter.transactionType;
@@ -63,7 +78,8 @@ export class TransactionsService {
     ]);
 
     return {
-      data,
+      success: true,
+      data: data.map((item) => this.mapToResponseDto(item)),
       meta: {
         total,
         page,
@@ -73,19 +89,40 @@ export class TransactionsService {
     };
   }
 
-  async update(userId: string, id: string, dto: UpdateTransactionDto) {
+  async update(
+    userId: string,
+    id: string,
+    dto: UpdateTransactionDto,
+  ): Promise<ApiResponse<TransactionResponseDto>> {
     const tx = await this.prisma.transaction.findFirst({
       where: { id, userId },
     });
     if (!tx) throw new NotFoundException('Transaction not found');
 
-    const data: any = { ...dto };
-    if (dto.transactedAt) data.transactedAt = new Date(dto.transactedAt);
+    const updateData: Prisma.TransactionUpdateInput = {
+      amount: dto.amount,
+      transactionType: dto.transactionType,
+      merchant: dto.merchant,
+      note: dto.note,
+      transactedAt: dto.transactedAt,
+    };
 
-    return this.prisma.transaction.update({
+    if (dto.categoryId !== undefined) {
+      updateData.category = dto.categoryId
+        ? { connect: { id: dto.categoryId } }
+        : { disconnect: true };
+    }
+
+    const updatedTransaction = await this.prisma.transaction.update({
       where: { id },
-      data,
+      data: updateData,
+      include: { category: true },
     });
+
+    return {
+      success: true,
+      data: this.mapToResponseDto(updatedTransaction),
+    };
   }
 
   async remove(id: string, userId: string): Promise<void> {
@@ -108,20 +145,26 @@ export class TransactionsService {
     month: number,
     year: number,
   ) {
-    const startDate = new Date(year, month - 1, 1);
-    const endDate = new Date(year, month, 0, 23, 59, 59, 999);
+    const startOfMonth = new Date(year, month - 1, 1);
+    const endOfMonth = new Date(year, month, 0, 23, 59, 59, 999);
 
     const transactions = await this.prisma.transaction.findMany({
       where: {
         userId,
-        transactedAt: { gte: startDate, lte: endDate },
+        transactedAt: {
+          gte: startOfMonth,
+          lte: endOfMonth,
+        },
       },
     });
 
     return transactions.reduce(
       (acc: { income: number; expense: number }, curr) => {
         const amount = Number(curr.amount);
-        if (curr.transactionType === 'income') acc.income += amount;
+        if (
+          (curr.transactionType as TransactionType) === TransactionType.INCOME
+        )
+          acc.income += amount;
         else acc.expense += amount;
         return acc;
       },
@@ -130,16 +173,13 @@ export class TransactionsService {
   }
 
   private calculateTrend(current: number, previous: number) {
-    // Both zero → no meaningful trend to show
     if (previous === 0 && current === 0) {
       return { value: 0, isPositive: true, noData: true };
     }
-    // Previous was zero but now there is data → brand-new activity
     if (previous === 0) {
       return { value: 100, isPositive: current > 0, noData: false };
     }
     const diff = current - previous;
-    // Use Math.abs(previous) so negative balances produce a correct positive percentage
     const percentage = Math.round((Math.abs(diff) / Math.abs(previous)) * 100);
     return {
       value: percentage,
@@ -155,12 +195,11 @@ export class TransactionsService {
       year,
     );
 
-    const prevMonth = month === 1 ? 12 : month - 1;
-    const prevYear = month === 1 ? year - 1 : year;
+    const prevMonthDate = new Date(year, month - 2, 1);
     const prevSummary = await this.calculatePeriodSummary(
       userId,
-      prevMonth,
-      prevYear,
+      prevMonthDate.getMonth() + 1,
+      prevMonthDate.getFullYear(),
     );
 
     const currentBalance = currentSummary.income - currentSummary.expense;
@@ -185,14 +224,17 @@ export class TransactionsService {
   }
 
   async getCategorySummary(userId: string, month: number, year: number) {
-    const startDate = new Date(year, month - 1, 1);
-    const endDate = new Date(year, month, 0, 23, 59, 59, 999);
+    const startOfMonth = new Date(year, month - 1, 1);
+    const endOfMonth = new Date(year, month, 0, 23, 59, 59, 999);
 
     const transactions = await this.prisma.transaction.findMany({
       where: {
         userId,
-        transactionType: 'expense',
-        transactedAt: { gte: startDate, lte: endDate },
+        transactionType: TransactionType.EXPENSE,
+        transactedAt: {
+          gte: startOfMonth,
+          lte: endOfMonth,
+        },
       },
       include: { category: true },
     });
@@ -221,5 +263,33 @@ export class TransactionsService {
     return Object.values(categorySummary).sort(
       (a: { value: number }, b: { value: number }) => b.value - a.value,
     );
+  }
+
+  private mapToResponseDto(
+    transaction: Prisma.TransactionGetPayload<{ include: { category: true } }>,
+  ): TransactionResponseDto {
+    return {
+      id: transaction.id,
+      userId: transaction.userId,
+      categoryId: transaction.categoryId,
+      amount: Number(transaction.amount),
+      transactionType: transaction.transactionType as TransactionType,
+      merchant: transaction.merchant,
+      bankSource: transaction.bankSource,
+      note: transaction.note,
+      source: transaction.source as TransactionSource,
+      parseStatus: transaction.parseStatus as ParseStatus,
+      transactedAt: transaction.transactedAt,
+      createdAt: transaction.createdAt,
+      updatedAt: transaction.updatedAt,
+      category: transaction.category
+        ? {
+            id: transaction.category.id,
+            name: transaction.category.name,
+            icon: transaction.category.icon,
+            color: transaction.category.color,
+          }
+        : undefined,
+    };
   }
 }

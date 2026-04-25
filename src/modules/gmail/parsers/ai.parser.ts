@@ -1,10 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI, GenerativeModel } from '@google/generative-ai';
+import {
+  ParseStatus,
+  TransactionType,
+} from '../../../common/constants/transaction.constant';
 
 export interface GeminiParsedResponse {
-  status: string;
-  type: string;
+  status: ParseStatus.SUCCESS | ParseStatus.FAILED;
+  type: TransactionType.EXPENSE | TransactionType.INCOME | null;
   amount: number | null;
   merchant: string | null;
   bankSource: string | null;
@@ -32,7 +36,7 @@ export class AiParser {
     }
     this.genAI = new GoogleGenerativeAI(apiKey);
     this.model = this.genAI.getGenerativeModel({
-      model: 'gemini-2.5-flash-lite',
+      model: 'gemini-2.0-flash-lite',
       generationConfig: {
         responseMimeType: 'application/json',
       },
@@ -97,10 +101,9 @@ export class AiParser {
     `;
 
     const maxRetries = 3;
-    let retryCount = 0;
     let lastError: unknown;
 
-    while (retryCount <= maxRetries) {
+    for (let retryCount = 0; retryCount < maxRetries; retryCount++) {
       try {
         const result = await this.model.generateContent(prompt);
         const response = result.response;
@@ -130,7 +133,6 @@ export class AiParser {
         if (isRateLimit && retryCount < maxRetries) {
           const delay = Math.pow(2, retryCount + 1) * 1000;
           await new Promise((resolve) => setTimeout(resolve, delay));
-          retryCount++;
           continue;
         }
 
