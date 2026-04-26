@@ -41,4 +41,3 @@ export class GetTransactionsFilterDto {
   @Transform(toUndefinedIfEmpty)
   categoryId?: string;
 }
-
