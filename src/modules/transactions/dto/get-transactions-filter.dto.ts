@@ -1,7 +1,10 @@
 import { IsOptional, IsString, IsEnum, IsDate } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { TransactionType } from '../../../common/constants/transaction.constant';
+
+const toUndefinedIfEmpty = ({ value }: { value: unknown }) =>
+  value === '' || value === null ? undefined : value;
 
 export class GetTransactionsFilterDto {
   @ApiPropertyOptional()
@@ -29,10 +32,13 @@ export class GetTransactionsFilterDto {
   @ApiPropertyOptional({ enum: TransactionType })
   @IsOptional()
   @IsEnum(TransactionType)
+  @Transform(toUndefinedIfEmpty)
   transactionType?: TransactionType;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @Transform(toUndefinedIfEmpty)
   categoryId?: string;
 }
+

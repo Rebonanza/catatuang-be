@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import type { ApiErrorResponse } from '../interfaces/api-response.interface';
 
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
@@ -32,7 +33,10 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
       message =
         typeof res === 'string' ? res : (resObj.message as string) || message;
-      code = (resObj.error as string) || this.getErrorCode(status);
+      code =
+        resObj.error != null && typeof resObj.error === 'string'
+          ? resObj.error
+          : this.getErrorCode(status);
       details =
         resObj.message && Array.isArray(resObj.message) ? resObj.message : [];
     } else {
@@ -42,7 +46,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       );
     }
 
-    const errorResponse = {
+    const errorResponse: ApiErrorResponse = {
       success: false,
       error: {
         code: code.toUpperCase().replace(/\s+/g, '_'),
